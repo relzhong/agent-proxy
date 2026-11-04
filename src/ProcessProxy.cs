@@ -1,5 +1,6 @@
 using System;
 using System.Collections.Generic;
+using System.Diagnostics;
 using System.IO;
 using System.Linq;
 using System.Net;
@@ -176,6 +177,54 @@ namespace LaunchDeck.ProcessProxy
         }
     }
 
+    // Follow running Store updates without subprocess polling or repeatedly hashing unchanged runtimes.
+    internal sealed class PackageProxyMaintenance
+    {
+        private string fingerprint;
+        private ProxyPlan cachedPlan;
+        internal ProxyPlan Discover(ProxyPlan current)
+        {
+            string executable=current.ExecutablePath;
+            string family=PackageName(executable);
+            Version version=PackageVersion(executable);
+            foreach(string name in new[]{"ChatGPT","Codex"})
+                foreach(Process process in Process.GetProcessesByName(name))
+                    using(process) try {
+                        string path=process.MainModule.FileName;
+                        var candidate=new ProxyPlan { ExecutablePath=path,ProxyHost=current.ProxyHost,ProxyPort=current.ProxyPort,Process443Approved=true,DriverApproved=true };
+                        candidate.Validate();
+                        if(PackageName(path)!=family || PackageVersion(path)<version) continue;
+                        executable=path;version=PackageVersion(path);
+                    } catch(ArgumentException) {} catch(FormatException) {} catch(System.ComponentModel.Win32Exception) {} catch(InvalidOperationException) {}
+            string next=Fingerprint(executable);
+            if(next==fingerprint) return cachedPlan;
+            var plan=new ProxyPlan { ExecutablePath=executable,ProxyHost=current.ProxyHost,ProxyPort=current.ProxyPort,Process443Approved=true,DriverApproved=true };
+            // Establish registered package identity before reading any copied runtime candidates.
+            ProxySecurity.VerifyRegisteredPackage(plan);
+            plan.BrowserHelperPaths=BrowserHelperScope.Resolve(executable);
+            plan.CoreHelperPaths=CoreHelperScope.Resolve(executable);
+            ProxySecurity.VerifyRegisteredPackage(plan);
+            fingerprint=next;
+            cachedPlan=plan;
+            return plan;
+        }
+        internal static string PackageName(string path) { return Path.GetFileName(Path.GetDirectoryName(Path.GetDirectoryName(path))).Split('_')[0]; }
+        internal static Version PackageVersion(string path) { return Version.Parse(Path.GetFileName(Path.GetDirectoryName(Path.GetDirectoryName(path))).Split('_')[1]); }
+        private static string Fingerprint(string executable)
+        {
+            var files=new List<string>{executable,CoreHelperScope.Source(executable),BrowserHelperScope.Source(executable)};
+            foreach(string root in new[]{CoreHelperScope.RuntimeRoot,BrowserHelperScope.RuntimeRoot})
+                if(Directory.Exists(root)) foreach(string dir in Directory.GetDirectories(root)) {
+                    string leaf=Path.GetFileName(dir);
+                    if(leaf.Length!=16 || !leaf.All(Uri.IsHexDigit)) continue;
+                    files.Add(root==CoreHelperScope.RuntimeRoot?Path.Combine(dir,"codex.exe"):Path.Combine(dir,"bin","node_repl.exe"));
+                }
+            return String.Join("|",files.OrderBy(x=>x,StringComparer.OrdinalIgnoreCase).Select(path=> {
+                var file=new FileInfo(path);return path+":"+(file.Exists?file.Length+":"+file.LastWriteTimeUtc.Ticks:"missing");
+            }));
+        }
+    }
+
     internal interface IProxyEngine : IDisposable
     {
         uint AddHttpProxy(string host, ushort port);
@@ -191,6 +240,10 @@ namespace LaunchDeck.ProcessProxy
     {
         private readonly IProxyEngine engine;
         private readonly List<uint> rules = new List<uint>();
+        private readonly HashSet<string> executableRules=new HashSet<string>(StringComparer.OrdinalIgnoreCase);
+        private string upstreamHost;
+        private int upstreamPort;
+        private string packageFamily;
         private uint proxy;
         private bool engineMayBeRunning;
         private bool disposed;
@@ -225,12 +278,42 @@ namespace LaunchDeck.ProcessProxy
                 engineMayBeRunning = true; // Even a partial Start must be rolled back.
                 if (!engine.Start()) throw new InvalidOperationException("The packet engine did not become ready.");
                 Ready = true;
+                upstreamHost=plan.ProxyHost;upstreamPort=plan.ProxyPort;
+                packageFamily=PackageProxyMaintenance.PackageName(plan.ExecutablePath);
+                foreach(string path in Paths(plan)) executableRules.Add(path);
             }
             catch
             {
                 Dispose();
                 throw;
             }
+        }
+        private static IEnumerable<string> Paths(ProxyPlan plan)
+        { return new[]{plan.ExecutablePath}.Concat(plan.BrowserHelperPaths??new string[0]).Concat(plan.CoreHelperPaths??new string[0]); }
+        internal bool ExtendVerifiedScope(ProxyPlan plan)
+        {
+            plan.Validate();
+            if(!Ready || disposed || plan.ProxyHost!=upstreamHost || plan.ProxyPort!=upstreamPort)
+                throw new InvalidOperationException("A live scope refresh cannot change its upstream.");
+            if(PackageProxyMaintenance.PackageName(plan.ExecutablePath)!=packageFamily)
+                throw new InvalidOperationException("A live scope refresh cannot change package family.");
+            string[] additions=Paths(plan).Distinct(StringComparer.OrdinalIgnoreCase).Where(x=>!executableRules.Contains(x)).ToArray();
+            if(executableRules.Count+additions.Length>64) throw new InvalidOperationException("Session update limit reached; restart LaunchDeck.");
+            var added=new List<uint>();
+            try {
+                foreach(string path in additions) {
+                    uint rule=engine.AddProcess443Rule(path,proxy);
+                    if(rule==0) throw new InvalidOperationException("Updated package rule failed.");
+                    added.Add(rule);
+                }
+            } catch {
+                // Preserve the existing working rules and engine when an update is incomplete.
+                foreach(uint rule in added) try {engine.DeleteRule(rule);} catch {rules.Add(rule);}
+                throw;
+            }
+            rules.AddRange(added);
+            foreach(string path in additions) executableRules.Add(path);
+            return additions.Length>0;
         }
         public void Dispose()
         {

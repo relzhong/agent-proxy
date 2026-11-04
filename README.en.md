@@ -30,11 +30,11 @@
   <img src="docs/images/theme-gallery.png" alt="Codex Proxy Launch Deck theme gallery" width="92%">
 </p>
 
-## v2.4.4 portable browser compatibility fix
+## v2.4.5 portable app-update compatibility fix
 
-Download [LaunchDeck.exe](https://github.com/gaopengbin/codex-launch-deck/releases/download/v2.4.4-portable/LaunchDeck.exe). This release fixes `Unexpected CUA launch entry` for the updated browser permission-guard import. The guard, authorization variables and launch arguments are preserved; only missing proxy forwarding names are added.
+Download [LaunchDeck.exe](https://github.com/gaopengbin/codex-launch-deck/releases/download/v2.4.5-portable/LaunchDeck.exe). This release fixes stale executable-path proxy rules after ChatGPT / Codex updates itself while the proxy is running. Every 15 seconds, the protected host checks running versions and copied helpers, verifies their identity and adds new exact paths while keeping the existing engine and rules active.
 
-The single EXE uses enhanced proxy by default, with no theme features or mode checkbox. Browser repair, tray operation and startup diagnostics remain available. Windows authorization is still required for protected components and driver use. See [release notes](docs/releases/v2.4.4-portable.md) and [portable usage](docs/portable.md). Theme features below apply to the full application and historical editions.
+The single EXE uses enhanced proxy by default, with no theme features or mode checkbox. Browser repair, tray operation and startup diagnostics remain available. Windows authorization is still required for protected components and driver use. See [release notes](docs/releases/v2.4.5-portable.md) and [portable usage](docs/portable.md). Theme features below apply to the full application and historical editions.
 
 ## Three jobs, one launch deck
 

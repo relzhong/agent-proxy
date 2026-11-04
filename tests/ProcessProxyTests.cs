@@ -11,6 +11,13 @@ using System.Threading;
 using LaunchDeck.ProcessProxy;
 class Tests
 {
+    class PendingControlReader:TextReader
+    {
+        private readonly System.Collections.Concurrent.BlockingCollection<char> chars=new System.Collections.Concurrent.BlockingCollection<char>();
+        internal PendingControlReader(string initial) { Send(initial); }
+        internal void Send(string value) { foreach(char c in value) chars.Add(c); }
+        public override int Read() { return chars.Take(); }
+    }
     class Engine:IProxyEngine
     {
         public List<string> Calls=new List<string>(); public bool FailStart,FailStop,FailRule,FailHelperRule,FailCoreRule,HangStart;
@@ -41,6 +48,15 @@ class Tests
     }
     static int Main(string[] args)
     {
+        if(args.Length==2 && args[0]=="--discover-installed-refresh") {
+            var previous=Plan();previous.ExecutablePath=args[1];
+            var watcher=new PackageProxyMaintenance();var discovered=watcher.Discover(previous);
+            ProxySecurity.VerifyRegisteredPackage(discovered);
+            Check(Object.ReferenceEquals(discovered,watcher.Discover(discovered)),"unchanged installed files reuse verified snapshot");
+            Console.WriteLine("Discovered registered package: "+discovered.ExecutablePath);
+            Console.WriteLine("Verified copied cores: "+discovered.CoreHelperPaths.Length+"; browser helpers: "+discovered.BrowserHelperPaths.Length);
+            return 0;
+        }
         if(args.Length==2 && args[0]=="--verify-installed-core") {
             var installed=Plan(); installed.ExecutablePath=args[1];
             installed.CoreHelperPaths=CoreHelperScope.Resolve(args[1]);
@@ -72,6 +88,36 @@ class Tests
             }
         }
         var core=Path.Combine(CoreHelperScope.RuntimeRoot,@"0123456789abcdef\codex.exe");
+        var update=Plan();update.ExecutablePath=update.ExecutablePath.Replace("26.928.2636.0","26.1029.7803.0");update.CoreHelperPaths=new[]{core};
+        var updateEngine=new Engine();
+        using(var live=new ProxySession(updateEngine)) {
+            live.Start(Plan());int before=updateEngine.Calls.Count;
+            Check(live.ExtendVerifiedScope(update),"updated package and newly copied core added live");
+            Check(updateEngine.Calls.Count==before+2,"exactly two new executable rules");
+            Check(live.Ready&&!updateEngine.Calls.Contains("stop"),"update keeps existing proxy engine alive");
+            Check(!live.ExtendVerifiedScope(update)&&updateEngine.Calls.Count==before+2,"unchanged update is idempotent");
+            var different=ProxyPlan.Parse(update.Serialize());different.ProxyPort=7890;
+            Reject(()=>live.ExtendVerifiedScope(different),"refresh cannot change upstream");
+            different=ProxyPlan.Parse(update.Serialize());different.ExecutablePath=different.ExecutablePath.Replace("OpenAI.Codex_","OpenAI.ChatGPT-Desktop_");
+            Reject(()=>live.ExtendVerifiedScope(different),"refresh cannot change approved package family");
+        }
+        var rollbackEngine=new Engine();
+        using(var live=new ProxySession(rollbackEngine)) {
+            live.Start(Plan());rollbackEngine.FailCoreRule=true;
+            Reject(()=>live.ExtendVerifiedScope(update),"partial update failure reported");
+            Check(live.Ready&&!rollbackEngine.Calls.Contains("stop")&&rollbackEngine.Calls.Contains("delete3"),"partial new rules rolled back without stopping existing rules");
+            rollbackEngine.FailCoreRule=false;
+            Check(live.ExtendVerifiedScope(update),"failed update can retry successfully");
+        }
+        var maintenanceInput=new PendingControlReader(Plan().Serialize()+"\nSTART\n");
+        var maintenanceEngine=new Engine();int maintenanceCalls=0,validations=0;
+        int maintenanceResult=BrokerSession.Run(maintenanceInput,new StringWriter(),p=>{p.Validate();validations++;},p=>true,()=>maintenanceEngine,1000,null,p=>{
+            maintenanceCalls++;if(maintenanceCalls==1) throw new IOException("update not ready");
+            maintenanceInput.Send("STOP\n");return update;
+        },10);
+        Check(maintenanceResult==0&&maintenanceCalls==2,"broker retries incomplete update and handles STOP with one pending reader");
+        Check(validations==2&&maintenanceEngine.Calls.Contains("target:"+update.ExecutablePath),"broker revalidates update before adding rules");
+        Check(maintenanceEngine.Calls.FindAll(x=>x=="stop").Count==1,"broker only stops engine on STOP");
         var corePlan=Plan();corePlan.CoreHelperPaths=new[]{core};
         Check(ProxyPlan.Parse(corePlan.Serialize()).CoreHelperPaths[0]==core,"core plan round trip");
         Check(corePlan.Matches(core,IPAddress.Parse("203.0.113.1"),443,true),"copied core remote 443 matched");

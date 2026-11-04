@@ -35,6 +35,22 @@ HTTP CONNECT proxy instead of a possibly poisoned local DNS address. The
 launcher does not modify the client ASAR, system DNS, FlClash, TUN or VPN.
 It activates the registered Windows package to preserve package identity.
 
+## Updates while the proxy is running
+
+The protected proxy host checks running package paths and copied runtime file
+metadata every 15 seconds. When ChatGPT updates itself, it verifies the new
+registered package and helper SHA256 values before adding their exact executable
+paths to the existing TCP 443 rules. It also picks up helpers copied after launch.
+Unchanged files are not repeatedly hashed. The upstream proxy and approved package
+family cannot change during a session. Incomplete updates are retried while the
+existing rules remain active; the engine is not restarted. A session accepts at
+most 64 distinct executable paths and then requires a launcher restart.
+
+This prevents stale version-specific rules after an app update. It does not
+disable client reconnects or guarantee recovery from upstream network failures.
+Replacing LaunchDeck itself still requires exiting the old launcher and starting
+the new EXE; an already running host does not load replacement code.
+
 ## Startup responsiveness and diagnostics
 
 Slow launch checks and activation-helper waits run away from the UI thread.

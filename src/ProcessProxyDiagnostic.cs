@@ -10,7 +10,7 @@ using System.Threading;
 using System.Web.Script.Serialization;
 namespace LaunchDeck.ProcessProxy
 {
-    internal enum DiagnosticStage { HostValidation, NativeVerification, Mutex, PipeConnect, PeerVerification, PlanValidation, Approval, EngineConstruction, EngineStart, Ready, Stop, Cleanup, Exit }
+    internal enum DiagnosticStage { HostValidation, NativeVerification, Mutex, PipeConnect, PeerVerification, PlanValidation, Approval, EngineConstruction, EngineStart, Ready, Stop, Cleanup, Exit, ScopeRefresh }
     internal enum DiagnosticResult { Enter, Success, Failed, Cancelled, NotConfirmed }
     internal sealed class ProxyDiagnostic : IDisposable
     {

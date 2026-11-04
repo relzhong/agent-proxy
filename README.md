@@ -30,13 +30,13 @@
   <img src="docs/images/theme-gallery.png" alt="Codex Proxy Launch Deck 主题商店" width="92%">
 </p>
 
-## v2.4.4 免安装浏览器兼容修复版
+## v2.4.5 免安装自动更新兼容修复版
 
-下载 [LaunchDeck.exe](https://github.com/gaopengbin/codex-launch-deck/releases/download/v2.4.4-portable/LaunchDeck.exe)，双击使用。修复新版 CUA 入口出现的 `Unexpected CUA launch entry`，兼容新增的权限检查脚本加载方式；保留权限检查、访问授权变量和原始入口，仅补齐浏览器代理转发。
+下载 [LaunchDeck.exe](https://github.com/gaopengbin/codex-launch-deck/releases/download/v2.4.5-portable/LaunchDeck.exe)，双击使用。修复 ChatGPT / Codex 在运行中自动升级后，增强代理仍沿用旧版程序路径的问题；每 15 秒检查运行中的版本及配套后台文件，校验后自动补齐代理规则，保留现有连接和代理引擎。
 
 便携版默认增强代理，无需勾选，不包含主题功能；保留浏览器修复、托盘保活和启动诊断。无需安装向导，首次准备受保护组件及启用驱动仍需 Windows 授权。
 
-详见 [修复说明](docs/releases/v2.4.4-portable.md) 和 [免安装使用说明](docs/portable.md)。下方主题工作台介绍适用于完整版和历史版本，当前免安装增强代理版不包含主题功能。
+详见 [修复说明](docs/releases/v2.4.5-portable.md) 和 [免安装使用说明](docs/portable.md)。下方主题工作台介绍适用于完整版和历史版本，当前免安装增强代理版不包含主题功能。
 
 ## 它解决什么
 

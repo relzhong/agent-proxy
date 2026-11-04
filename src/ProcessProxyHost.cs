@@ -55,7 +55,8 @@ namespace LaunchDeck.ProcessProxy
                                 {
                                 int code=BrokerSession.Run(reader,writer,ProxySecurity.VerifyRegisteredPackage,
                                     plan=>ProxyApproval.Confirm(plan,pipe),
-                                    ()=>new NativeEngine(Path.Combine(directory,"process-proxy-native"),diagnostic),30000,diagnostic);
+                                    ()=>new NativeEngine(Path.Combine(directory,"process-proxy-native"),diagnostic),30000,diagnostic,
+                                    new PackageProxyMaintenance().Discover);
                                 diagnostic.Record(DiagnosticStage.Exit,code==0?DiagnosticResult.Success:DiagnosticResult.Failed);
                                 return code;
                                 }

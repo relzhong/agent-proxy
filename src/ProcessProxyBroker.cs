@@ -6,7 +6,8 @@ namespace LaunchDeck.ProcessProxy
     internal static class BrokerSession
     {
         internal static int Run(TextReader reader, TextWriter writer, Action<ProxyPlan> validate,
-            Func<ProxyPlan,bool> approve, Func<IProxyEngine> factory, int startupTimeoutMs, ProxyDiagnostic diagnostic=null)
+            Func<ProxyPlan,bool> approve, Func<IProxyEngine> factory, int startupTimeoutMs, ProxyDiagnostic diagnostic=null,
+            Func<ProxyPlan,ProxyPlan> refresh=null,int maintenanceIntervalMs=15000)
         {
             diagnostic=diagnostic??new ProxyDiagnostic((Action<string>)null);
             diagnostic.Record(DiagnosticStage.PlanValidation,DiagnosticResult.Enter);
@@ -46,7 +47,24 @@ namespace LaunchDeck.ProcessProxy
                 startupPending=false;
                 diagnostic.Record(DiagnosticStage.Ready,DiagnosticResult.Success);
                 writer.WriteLine("READY"); writer.Flush();
-                ProxyProtocol.RequireStop(ProxyProtocol.ReadLine(reader)); // STOP or EOF only.
+                if(refresh==null) ProxyProtocol.RequireStop(ProxyProtocol.ReadLine(reader));
+                else {
+                    // Keep one pending control read; STOP/EOF never races a second reader.
+                    Task<string> control=Task.Factory.StartNew(()=>ProxyProtocol.ReadLine(reader));
+                    while(!control.Wait(maintenanceIntervalMs)) {
+                        try {
+                            var updated=refresh(plan);
+                            if(updated==null || updated.Serialize()==plan.Serialize()) continue;
+                            validate(updated); // Recheck registration and copied helper hashes in the protected host.
+                            bool changed=session.ExtendVerifiedScope(updated);
+                            plan=updated;
+                            if(changed) {diagnostic.RecordPlan(plan);diagnostic.Record(DiagnosticStage.ScopeRefresh,DiagnosticResult.Success);}
+                        } catch(Exception error) {
+                            diagnostic.Record(DiagnosticStage.ScopeRefresh,DiagnosticResult.Failed,error);
+                        }
+                    }
+                    ProxyProtocol.RequireStop(control.Result);
+                }
                 diagnostic.Record(DiagnosticStage.Stop,DiagnosticResult.Enter);
                 session.Dispose();
                 diagnostic.Record(DiagnosticStage.Cleanup,session.CleanupError==null?DiagnosticResult.Success:DiagnosticResult.NotConfirmed);
