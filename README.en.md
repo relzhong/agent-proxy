@@ -1,147 +1,90 @@
-<p align="center">
-  <img src="docs/images/banner.png" alt="Codex Proxy Launch Deck" width="100%">
-</p>
+<h1 align="center">Agent Proxy (agent-proxy)</h1>
 
 <p align="center">
   <a href="README.md">简体中文</a> · <strong>English</strong>
 </p>
 
 <p align="center">
-  <a href="https://github.com/gaopengbin/codex-launch-deck/releases/latest"><img src="https://img.shields.io/github/v/release/gaopengbin/codex-launch-deck?style=flat-square&color=cfff32" alt="Latest release"></a>
-  <a href="https://github.com/gaopengbin/codex-launch-deck/releases"><img src="https://img.shields.io/github/downloads/gaopengbin/codex-launch-deck/total?style=flat-square&color=31c9b2" alt="Total downloads"></a>
-  <img src="https://img.shields.io/badge/Windows-10%20%7C%2011-0b7668?style=flat-square" alt="Windows 10 / 11">
-  <a href="LICENSE"><img src="https://img.shields.io/github/license/gaopengbin/codex-launch-deck?style=flat-square&color=173d34" alt="MIT License"></a>
+  <a href="https://github.com/relzhong/agent-proxy/actions"><img src="https://img.shields.io/github/actions/workflow/status/relzhong/agent-proxy/ci-release.yml?style=flat-square" alt="CI Status"></a>
+  <img src="https://img.shields.io/badge/Windows-10%20%7C%2011%20x64-0b7668?style=flat-square" alt="Windows 10 / 11 x64">
+  <a href="LICENSE"><img src="https://img.shields.io/github/license/relzhong/agent-proxy?style=flat-square" alt="License"></a>
 </p>
 
 <p align="center">
-  <strong>A Windows launch and theme workstation for Codex.</strong><br>
-  Launch Codex through a local proxy without changing the Windows system proxy, browse and hot-swap CodeDrobe themes, and reuse your signed-in local Codex to create complete themes.
+  A unified per-app Windows proxy launcher for <strong>ChatGPT / Codex (Microsoft Store)</strong> and <strong>Antigravity (Desktop)</strong> without changing system proxy settings or enabling TUN mode.
 </p>
 
-<p align="center">
-  <a href="https://github.com/gaopengbin/codex-launch-deck/releases/latest"><strong>Download for Windows</strong></a>
-  &nbsp;·&nbsp;
-  <a href="https://codedrobe.app">CodeDrobe Store</a>
-  &nbsp;·&nbsp;
-  <a href="#quick-start">Quick start</a>
-</p>
+---
 
-<p align="center">
-  <img src="docs/images/theme-gallery.png" alt="Codex Proxy Launch Deck theme gallery" width="92%">
-</p>
+## Features
 
-## v2.4.5 portable app-update compatibility fix
+- **Unified Launcher for Both Clients**
+  - **ChatGPT / Codex (Store)**: Preserves Store AUMID activation, transient registry environment backup/restore, and CUA browser forwarding / read compatibility fixes.
+  - **Antigravity (Desktop)**: Embeds `version.dll` (MinHook + Winsock redirection + child injection), automatically writes `%LOCALAPPDATA%\Programs\Antigravity\config.json`, verifies/restores `version.dll` across client updates, covers `Antigravity.exe` and `language_server.exe`, and supports one-click patch removal.
+- **Local & LAN Proxy Support**
+  - Supports both loopback (`127.0.0.1`) and non-loopback unicast IPv4 addresses (e.g. `192.168.x.x`).
+  - Non-loopback proxy IPs are automatically added to direct bypass rules (`NO_PROXY`, `--proxy-bypass-list`, WinDivert direct rule, and Antigravity routing bypass) to avoid proxy loops.
+- **HTTP & SOCKS5 Protocol Support**
+  - **Antigravity (Desktop)**: Supports both `HTTP` and `SOCKS5` natively (no driver or admin elevation required).
+  - **ChatGPT / Codex (Store)**:
+    - **Standard mode (Enhanced Proxy unchecked)**: Supports `HTTP / Mixed` ports without drivers or UAC elevation. *Note: SOCKS5 is not supported in standard Codex / ChatGPT mode; the UI warns and requires checking Enhanced Proxy or switching to HTTP.*
+    - **Enhanced mode (optional checkbox, WinDivert + ProxyBridge)**: Supports both `HTTP` and `SOCKS5` with TLS SNI hostname forwarding (`chatgpt.com`, `openai.com`, `oaistatic.com`, `oaiusercontent.com`) and live Store update / helper tracking.
 
-Download [LaunchDeck.exe](https://github.com/gaopengbin/codex-launch-deck/releases/download/v2.4.5-portable/LaunchDeck.exe). This release fixes stale executable-path proxy rules after ChatGPT / Codex updates itself while the proxy is running. Every 15 seconds, the protected host checks running versions and copied helpers, verifies their identity and adds new exact paths while keeping the existing engine and rules active.
+---
 
-The single EXE uses enhanced proxy by default, with no theme features or mode checkbox. Browser repair, tray operation and startup diagnostics remain available. Windows authorization is still required for protected components and driver use. See [release notes](docs/releases/v2.4.5-portable.md) and [portable usage](docs/portable.md). Theme features below apply to the full application and historical editions.
+## Quick Start
 
-## Three jobs, one launch deck
+1. Download **`AgentProxy.exe`** from [Releases](https://github.com/relzhong/agent-proxy/releases) (or CI build artifacts).
+2. Fully quit the target desktop client (ChatGPT / Codex or Antigravity).
+3. Run `AgentProxy.exe`:
+   - Select **Target app**: `ChatGPT / Codex (Store)` or `Antigravity (Desktop)`.
+   - Enter **Proxy host** (`127.0.0.1` or LAN IP), **Proxy port**, and **Protocol** (`HTTP` / `SOCKS5`).
+   - For **ChatGPT / Codex**: keep **Enable enhanced proxy** unchecked for driver-free `HTTP` launch, or check it for `SOCKS5` / kernel-level TCP 443 coverage.
+   - For **Antigravity**: pick `HTTP` or `SOCKS5` and click **Apply proxy & launch Antigravity** (no admin prompt required).
 
-| App proxy launch | Theme store and live switching | Local Codex-powered creation |
-| --- | --- | --- |
-| Activates the registered ChatGPT package with proxy variables. The launcher briefly sets them in the current user's environment, restores their prior values after process creation, and never changes the Windows system proxy. Another app started during that brief window may read them. | Search, install, cache, and apply CodeDrobe themes. A managed watcher restores the theme after renderer reloads. | Turn a brief or reference image into a validated `.codedrobe-theme` with your already authenticated Codex CLI. No extra API key is required. |
+See [portable documentation](docs/portable.md) and [process-proxy technical notes](docs/process-proxy.md) for security boundaries and component verification details.
 
-## Highlights
+---
 
-- One flow for proxy checks, Codex startup, theme validation, and application.
-- Live theme switching without restarting Codex, including native light/dark appearance sync.
-- Full theme coverage for the main UI, output/sources panel, tooltips, popovers, menus, lists, and dialogs.
-- Marketplace search, sorting, download progress, integrity checks, local cache, and a bundled offline theme.
-- CSS-only, uploaded-reference, and AI-background authoring modes.
-- Accurate process and renderer detection with adaptive CDP port discovery.
-- One-click restoration of native Codex appearance and watcher cleanup.
+## Build & Test
 
-## Product views
-
-| Create with local Codex | Apply to a running Codex window |
-| --- | --- |
-| ![AI theme creation](docs/images/ai-theme-creation.png) | ![A CodeDrobe theme applied to Codex](docs/images/theme-applied-codex.png) |
-
-## What's new in v2.3.2
-
-- Activate the updated ChatGPT Windows package through its registered app entry point, fixing the “process has no package identity” startup error.
-- Temporarily set current-user proxy environment values for package activation, restore their previous values after process creation, and pass proxy arguments to ChatGPT.
-- Bundle the required launch helper with the desktop installer and legacy ZIP. Keep both EXEs together when using the legacy launcher.
-
-## What's new in v2.3.1
-
-- Fix access denied (OS error 5) when launching some Microsoft Store installations of Codex / ChatGPT by retrying with package identity.
-- Explicitly pass proxy environment variables in the package context without changing the Windows system proxy.
-- Hide the compatibility helper to avoid a brief PowerShell console flash.
-- Apply the fix to both the desktop and legacy lightweight launchers. See [#10](https://github.com/gaopengbin/codex-launch-deck/issues/10).
-
-> The fallback requires Windows `Invoke-CommandInDesktopPackage` and Windows Script Host. It may be unavailable where enterprise policy disables these components.
-
-## What's new in v2.1.1
-
-- Added a complete component-coverage contract for AI-generated themes.
-- Styled right-side summary panels, tooltips, popovers, menus, lists, dialogs, and interaction states.
-- Finds an executable Codex CLI instead of selecting an inaccessible Microsoft Store copy.
-- Reuses the launcher's proxy configuration for AI authoring jobs.
-- Waits and retries when Codex has started but its DOM is not ready for theme injection.
-
-## Quick start
-
-1. Enable an HTTP or mixed port in your local proxy application.
-2. Install Launch Deck from the [latest GitHub Release](https://github.com/gaopengbin/codex-launch-deck/releases/latest).
-3. Enter the proxy host and port, then run the connectivity check.
-4. Select a theme and choose **Launch Codex**. If Codex is already running with CDP enabled, choose **Apply theme live**.
-
-> If your proxy application exposes a SOCKS port, use its HTTP or mixed port. Launch Deck supplies an HTTP proxy URL.
-
-## Downloads
-
-| Asset | Use case |
-| --- | --- |
-| `Codex.Proxy.Launch.Deck_*_x64-setup.exe` | Recommended NSIS installer |
-| `Codex.Proxy.Launch.Deck_*_x64_en-US.msi` | MSI deployment |
-| `ChatGPTProxyLauncher-Legacy-win-x64.zip` | Legacy launcher, required launch helper, bundled theme, and shortcut helper |
-
-Public binaries are currently unsigned, so Windows SmartScreen may display a warning. Always download from this repository's Release page.
-
-## Create a custom theme
-
-1. Open **AI creation** in Launch Deck.
-2. Enter a visual brief and choose the required light or dark Codex base.
-3. Select **CSS only**, **Upload reference**, or **AI background**.
-4. Follow the live generation status. Launch Deck validates the package, component coverage, artwork, and card cover before adding it to the local library.
-
-Generated packages are stored in `%LOCALAPPDATA%\CodexProxyLaunchDeck\themes`. The CodeDrobe theme skill is required; Launch Deck detects it and can install it for the current user.
-
-<details>
-<summary><strong>Using themes with Cockpit Tools</strong></summary>
-
-Add this to the default instance's custom launch arguments:
-
-```text
---remote-debugging-port=9335
-```
-
-Fully exit Codex before relaunching it through Cockpit Tools. Launch Deck detects the CDP port from the process command line; choose another free port if `9335` is occupied.
-
-</details>
-
-## Privacy
-
-Launch Deck does not forward or inspect network traffic. It only checks whether the configured proxy endpoint accepts a connection and passes environment variables to the new Codex process. Reference images are provided only to the explicitly started local Codex authoring job; Launch Deck does not upload them to its own service.
-
-## Build
+Prerequisites: Windows 10/11 x64, .NET Framework 4.x (`csc.exe`), Visual Studio 2022 C++ x64 build tools (`cl.exe`), Python 3.
 
 ```powershell
-cd desktop
-npm ci
-npm run lint
-npm run build
-npm run tauri build
+# Run automated tests
+.\tests\test-antigravity-launcher.ps1
+.\tests\test-process-proxy.ps1
+.\tests\test-native-process-proxy.ps1
+.\tests\test-tls-proxy.ps1
+.\tests\test-cua-forwarding.ps1
+.\tests\test-browser-launch-policy.ps1
+.\tests\test-activation-handoff.ps1
+
+# Build standalone directory (standard mode + Antigravity version.dll, no WinDivert)
+.\build.ps1 -OutputDirectory .\output\dist
+.\tests\test-launcher-lifetime.ps1 -LauncherExecutable .\output\dist\AgentProxyLauncher.exe
+
+# Build full enhanced ZIP & single-file portable AgentProxy.exe
+.\scripts\build-process-proxy.ps1 -OutputRoot .\output\enhanced
+.\scripts\build-portable.ps1 -OutputDirectory .\output\portable -NativePackage .\output\enhanced\package -NativeArtifactsSource .\output\enhanced\NativeArtifacts.generated.cs
 ```
 
-```powershell
-cd desktop\src-tauri
-cargo test --locked
-cargo clippy --locked --all-targets --all-features -- -D warnings
-```
+---
+
+## Upstream Citations & Acknowledgments
+
+This project integrates and builds upon the following open-source repositories:
+
+- **[gaopengbin/codex-launch-deck](https://github.com/gaopengbin/codex-launch-deck)** (`v2.4.5-portable`, MIT License)
+  Store package activation, transient environment backup/restore, CUA browser forwarding/read compatibility, and the WinDivert + ProxyBridge enhanced process-proxy architecture and verification pipeline.
+- **[yuaotian/antigravity-proxy](https://github.com/yuaotian/antigravity-proxy)** (BSD-2-Clause License)
+  `version.dll` (MinHook + FakeIP + child-process injection) Winsock proxy layer supporting HTTP / SOCKS5 and `language_server.exe` for Antigravity Desktop.
+- **Underlying native dependencies**:
+  - [InterceptSuite/ProxyBridge](https://github.com/InterceptSuite/ProxyBridge) (MIT License)
+  - [basil00/WinDivert](https://github.com/basil00/WinDivert) (LGPLv3 / GPLv2)
+
+---
 
 ## License
 
-[MIT](LICENSE)
+Launcher code and modifications are licensed under the [MIT License](LICENSE). Bundled third-party components retain their respective licenses (MIT / BSD-2-Clause / LGPLv3).

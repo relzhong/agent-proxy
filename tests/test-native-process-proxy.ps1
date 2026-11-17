@@ -1,7 +1,7 @@
 $ErrorActionPreference='Stop'
 $repo=Split-Path -Parent $PSScriptRoot
 . "$repo\scripts\msvc-environment.ps1"
-$fixture=Join-Path ([IO.Path]::GetTempPath()) ('launchdeck-native-tests-'+[Guid]::NewGuid().ToString('N'))
+$fixture=Join-Path ([IO.Path]::GetTempPath()) ('agentproxy-native-tests-'+[Guid]::NewGuid().ToString('N'))
 New-Item -ItemType Directory $fixture | Out-Null
 python "$PSScriptRoot\native-process-proxy\generate-native-tests.py" $fixture
 if ($LASTEXITCODE -ne 0) { throw 'Fixture generation failed.' }

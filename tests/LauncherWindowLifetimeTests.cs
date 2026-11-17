@@ -11,7 +11,7 @@ internal static class LauncherWindowLifetimeTests
     private static int Main(string[] args)
     {
         var assembly = Assembly.LoadFrom(args[0]);
-        var type = assembly.GetType("ChatGPTProxyLauncherLite.LauncherForm", true);
+        var type = assembly.GetType("AgentProxy.LauncherForm", true);
         var activationTimer=System.Diagnostics.Stopwatch.StartNew();
         var pendingActivation=(System.Threading.Tasks.Task)type.GetMethod("StartPackagedChatGPT",BindingFlags.Static|BindingFlags.NonPublic).Invoke(null,new object[]{"http://127.0.0.1:10808",null,null});
         if(activationTimer.ElapsedMilliseconds>=1500) throw new Exception("Activation blocked the calling UI thread.");
@@ -24,7 +24,7 @@ internal static class LauncherWindowLifetimeTests
         Console.WriteLine("PASS WebSocket activation backup/restore key coverage");
         foreach (string scenario in new[] { "active-close", "explicit-exit", "shutdown", "inactive-close" })
         {
-            var traceType=assembly.GetType("ChatGPTProxyLauncherLite.LauncherDiagnostics",true);
+            var traceType=assembly.GetType("AgentProxy.LauncherDiagnostics",true);
             var traceRoot=Path.Combine(Path.GetTempPath(),"launchdeck-ui-diagnostics-"+Guid.NewGuid().ToString("N"));
             var trace=(IDisposable)Activator.CreateInstance(traceType,Fields,null,new object[]{traceRoot},null);
             var form=(Form)Activator.CreateInstance(type,Fields,null,new object[]{trace},null);

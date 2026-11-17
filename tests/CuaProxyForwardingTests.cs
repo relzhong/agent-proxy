@@ -4,7 +4,7 @@ using System.IO;
 using System.Linq;
 using System.Text;
 using System.Web.Script.Serialization;
-using ChatGPTProxyLauncherLite;
+using AgentProxy;
 
 class CuaProxyForwardingTests
 {
@@ -79,7 +79,7 @@ class CuaProxyForwardingTests
             f = new Fixture(root); var snap = f.Service.Check(); f.Service.BeforeReplace = () => f.Edit("\"KEEP\"", "\"RACE\"");
             Reject(() => f.Service.Repair(snap), "pre-replace concurrent write refused"); Assert(File.ReadAllText(f.Config).Contains("RACE") && !File.ReadAllText(f.Config).Contains("HTTPS_PROXY"), "race not overwritten");
             f = new Fixture(root); snap = f.Service.Check(); byte[] failureOriginal = File.ReadAllBytes(f.Config); f.Service.ReplaceFile = (a,b,c) => { throw new IOException("simulated atomic replace failure"); };
-            Reject(() => f.Service.Repair(snap), "atomic write failure reported"); Assert(failureOriginal.SequenceEqual(File.ReadAllBytes(f.Config)) && !Directory.GetFiles(Path.GetDirectoryName(f.Config), "*.launchdeck-tmp-*").Any(), "failure leaves original and removes temp");
+            Reject(() => f.Service.Repair(snap), "atomic write failure reported"); Assert(failureOriginal.SequenceEqual(File.ReadAllBytes(f.Config)) && !Directory.GetFiles(Path.GetDirectoryName(f.Config), "*.agentproxy-tmp-*").Any(), "failure leaves original and removes temp");
             f = new Fixture(root); snap = f.Service.Check(); f.Service.ReplaceFile = (a,b,c) => { f.Edit("\"KEEP\"", "\"LATE-RACE\""); File.Replace(a,b,c); };
             Reject(() => f.Service.Repair(snap), "rename-gap race detected"); Assert(File.ReadAllText(f.Config).Contains("LATE-RACE") && !File.ReadAllText(f.Config).Contains("HTTPS_PROXY"), "late concurrent file restored");
             f = new Fixture(root); f.Edit("\"env_vars\":[\"CODEX_WINDOWS_REGISTERED_CORE\",\"KEEP\"],", ""); snap = f.Service.Check(); result = f.Service.Repair(snap); Assert(f.Service.Check().Missing.Length == 0, "missing env_vars property inserted"); f.Service.Rollback(result.RecordPath); Assert(snap.Bytes.SequenceEqual(File.ReadAllBytes(f.Config)), "insert rollback exact");

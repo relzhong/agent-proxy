@@ -1,5 +1,5 @@
 using System;
-using LaunchDeck.ProcessProxy;
+using AgentProxy.ProcessProxy;
 class BrowserHelperScopeCheck
 {
     static int Main(string[] args)

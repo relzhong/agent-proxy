@@ -1,38 +1,30 @@
-# Launch Deck enhanced process proxy (Windows x64)
+# AgentProxy Enhanced Process Proxy (Windows x64)
 
-The `LaunchDeck-Enhanced-win-x64.zip` release contains the C# Launch Deck with one optional enhanced proxy checkbox. It supplements the existing HTTP/environment proxy setting for the desktop client's Node WebSocket connections, including cloud task navigation. The Tauri NSIS/MSI application does not yet have this checkbox; its regular proxy environment fix is included separately.
+`AgentProxy-Enhanced-win-x64.zip` and the portable `AgentProxy.exe` bundle the C# launcher with an optional WinDivert-based enhanced proxy for Microsoft Store `ChatGPT.exe` / `Codex.exe`, alongside `version.dll` injection for `Antigravity.exe`.
 
 ## Install and use
 
-1. Download the Enhanced ZIP and its `.sha256` file from the same GitHub release. Compare `Get-FileHash -Algorithm SHA256` with the published checksum, then extract the ZIP. The package includes file checksums, source and licenses.
-2. Run `Install-Enhanced.ps1` using 64-bit Windows PowerShell. It requests normal administrator approval and installs only its fixed, hash-pinned components under `C:\Program Files\LaunchDeckProcessProxy\<bundle-id>`. Do not disable execution policy, certificate checks or security controls to install it. A policy, signature, existing WinDivert service, proxy host or relay-port conflict stops installation. An existing version is never overwritten; no driver or client starts during installation. If it stops after creating files, retain them for inspection.
-3. Start the installed `ChatGPTProxyLauncher.exe` as your normal user. Use an existing local **HTTP CONNECT** proxy such as `127.0.0.1:10808`; enable the enhanced checkbox and launch your registered ChatGPT/Codex package through Launch Deck. Approve normal UAC and the visible, cancellable scope confirmation. The same proxy endpoint is reused by the ordinary proxy settings and enhanced mode; this release does not support authenticated enhanced upstream proxies.
-4. Wait for the enhanced state to become ready before opening the affected cloud task. Waiting approval and failure are distinct states. Do not start a second enhanced instance or repeatedly retry an exit/cleanup failure.
+1. Download `AgentProxy.exe` (single portable executable) or `AgentProxy-Enhanced-win-x64.zip` and verify the published `.sha256` checksum.
+2. For portable use, run `AgentProxy.exe` directly as a normal user. For fixed machine installation of the enhanced package, run `Install-Enhanced.ps1` in 64-bit Windows PowerShell (installs hash-pinned components under `C:\Program Files\AgentProxyProcessProxy\<bundle-id>`).
+3. In **ChatGPT / Codex (Store)** mode, uncheck **Enable enhanced proxy** for standard `HTTP / Mixed` launching without drivers, or check it for `HTTP` / `SOCKS5` kernel-level TCP 443 redirection.
+4. In **Antigravity (Desktop)** mode, choose `HTTP` or `SOCKS5` and launch without administrator elevation or WinDivert.
 
-The WinDivert driver is loaded only after approval when an enhanced session starts. Launch Deck itself and the managed host are not claimed to have an Authenticode publisher signature; the bundled official WinDivert driver must validate against its pinned publisher certificate. Some Windows policies may prohibit this package; report that failure rather than bypassing them.
+## Actual scope & security boundaries
 
-## Actual scope
-
-The host validates the full EXE path against the currently registered OpenAI Windows package. It redirects **that selected executable's remote TCP port 443 connections** through the selected IPv4 loopback HTTP proxy. It does not implement strict domain-only selection, intercept TLS plaintext, edit ASAR, inject into the client, change system proxy/TUN/VPN settings, or configure autostart. Package updates can change the EXE path and require a new session.
-
-WinDivert's packet filter observes TCP 443 and relay-port packets before process ownership and connection matching. Unmatched packets are reinjected unchanged. Other applications, loopback destinations, UDP and DNS are not redirected. The internal exclusive relay uses port 34010. Existing WinDivert/relay conflicts are refused rather than shared or taken over.
-
-For TLS connections to `chatgpt.com`, `openai.com`, `oaistatic.com` and `oaiusercontent.com` (including subdomains), enhanced mode reads the public ClientHello server name and sends that hostname in HTTP CONNECT. This avoids forwarding a poisoned local DNS address to the upstream. It peeks without consuming or changing TLS bytes, does not decrypt application traffic, and does not log hostnames. Split TCP reads and TLS records are supported. Missing, encrypted or invalid SNI, other domains and authenticated proxy configurations retain the existing IP forwarding path; the initial peek is bounded to one second and 64 KiB. The upstream remains responsible for its own DNS resolution.
-
-## Stop, rollback and limits
-
-The portable browser repair also allows exact copied `node_repl.exe` paths under the current user's Codex runtime cache. Each file must match the helper shipped with the currently registered package; paths and hashes are checked again by the elevated host. These additional rules route remote TCP 443 only. General Node executables and unrelated applications are excluded. See [portable usage](portable.md).
-
-Uncheck enhanced mode or close its launcher to request host cleanup. Stopping can interrupt existing connections. A lost control pipe or failed native stop blocks new enhanced sessions; an owned host still running after the first wait remains observed rather than abandoned. Never force-kill another application's service or delete a driver to clear this state.
-
-After host exit and driver/relay cleanup have been independently confirmed, return to the previous retained launcher version. Version directories are immutable and older versions are kept. Manual removal of a protected version needs administrator approval; it is not an automatic uninstall procedure, and this release does not automatically delete driver service registrations.
-
-Real Windows validation confirmed engine readiness, a durable WebSocket connection and successful thread/read and thread/turns/list responses without TUN in the tested session, followed by the user's recovery report. **Real driver stop/unload and rollback have not yet been accepted on the machine** because the successful active connection was preserved. The isolated native tests exercise lifecycle and packet matching without loading WinDivert; they do not substitute for that remaining acceptance test. Newly rebuilt distribution binaries are from the same source but are not claimed to have undergone a new live forwarding test.
-
-This fix addresses Launch Deck's proxy coverage for the desktop client. It does not claim to repair unrelated Windows native tool availability or all cloud permission/routing errors.
+- **Store ChatGPT / Codex enhanced scope**: Validates the full EXE path against the registered OpenAI Windows package plus hash-verified `node_repl.exe` and `codex.exe` runtime caches. Redirects only those executables' remote TCP port 443 connections through the selected `HTTP` or `SOCKS5` unicast IPv4/loopback upstream. Non-loopback proxy hosts and all loopback ranges are excluded from redirection.
+- **WinDivert driver verification**: The bundled official WinDivert 2.2.2-A `WinDivert64.sys` driver is verified via `WinVerifyTrust` against its pinned Authenticode thumbprint (`043589F75FCE2795E7F2CC3E526D46784D5DDAB3`) before loading.
+- **TLS SNI forwarding**: For TLS connections to `chatgpt.com`, `openai.com`, `oaistatic.com`, and `oaiusercontent.com`, enhanced mode peeks ClientHello SNI (bounded to 1s / 64 KiB, without decrypting or logging payloads) and forwards the hostname in HTTP `CONNECT` or SOCKS5 `ATYP_DOMAIN`.
+- **Antigravity Desktop scope**: Uses vendored `antigravity-proxy` (`version.dll`) verified by SHA-256 on each launch; generates/updates `config.json` with `ui.load_notify = "none"` and upstream bypass rules.
 
 ## Build and licensing
 
-Run `tests/test-process-proxy.ps1`, `tests/test-native-process-proxy.ps1` and `tests/test-tls-proxy.ps1` before `scripts/build-process-proxy.ps1`. Requirements: Windows x64, .NET Framework compiler, Microsoft C++ x64 tools and Python 3. Build output must be a fresh directory. Builds never load the production DLL/driver. Fixed dependency SHA256 values and driver certificate pins are checked; real hashes of the newly built native DLL are compiled into the launcher and host. The host pins the newly built launcher's hash.
+Run the test suite in `tests/` before building:
 
-The native MIT source is in `native/proxybridge`, forked from InterceptSuite/ProxyBridge commit `02703a0672a8b94011a4698368a392f7734c10dc`. The official WinDivert 2.2.2-A runtime is dynamically linked under its LGPLv3 option. Full licenses, modified ProxyBridge source and corresponding WinDivert v2.2.2 source accompany the Enhanced ZIP. To rebuild against a modified compatible LGPL library, rebuild the package/pins from source rather than replacing a protected runtime silently. Normal GitHub source archives contain the launcher, host, build scripts and tests.
+```powershell
+.\scripts\build-process-proxy.ps1
+.\scripts\build-portable.ps1 -OutputDirectory .\output\portable -NativePackage .\output\enhanced\package -NativeArtifactsSource .\output\enhanced\NativeArtifacts.generated.cs
+```
+
+- `native/proxybridge`: MIT-licensed fork of `InterceptSuite/ProxyBridge` (`02703a0672a8b94011a4698368a392f7734c10dc`).
+- `native/antigravity-proxy`: BSD-2-Clause-licensed `yuaotian/antigravity-proxy` (`72bb5ff59881183ce258d339100aaadba072956a`).
+- WinDivert 2.2.2-A runtime: dynamically linked under LGPLv3 (full license and source archive included in `LICENSES/` and `SOURCE/`).

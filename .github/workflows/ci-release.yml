@@ -1,0 +1,88 @@
+name: Build, Test & Release
+
+on:
+  push:
+    branches:
+      - main
+    tags:
+      - 'v*'
+  pull_request:
+    branches:
+      - main
+  workflow_dispatch:
+
+permissions:
+  contents: write
+
+jobs:
+  build-and-test:
+    runs-on: windows-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.12'
+
+      - name: Run managed and Antigravity unit tests
+        shell: powershell
+        run: |
+          .\tests\test-antigravity-launcher.ps1
+          .\tests\test-process-proxy.ps1
+          .\tests\test-cua-forwarding.ps1
+          .\tests\test-browser-launch-policy.ps1
+          .\tests\test-activation-handoff.ps1
+
+      - name: Run native C/C++ lifecycle and TLS SNI tests (no driver)
+        shell: powershell
+        run: |
+          .\tests\test-native-process-proxy.ps1
+          .\tests\test-tls-proxy.ps1
+
+      - name: Build enhanced distribution and Antigravity version.dll
+        shell: powershell
+        run: |
+          $ProgressPreference = 'SilentlyContinue'
+          .\scripts\build-process-proxy.ps1 -OutputRoot output\enhanced
+
+      - name: Build and verify standalone dist launcher
+        shell: powershell
+        run: |
+          .\build.ps1 -OutputDirectory output\dist -SkipAntigravityNative
+          New-Item -ItemType Directory -Force -Path output\dist\antigravity-proxy | Out-Null
+          Copy-Item -LiteralPath output\enhanced\package\antigravity-proxy\version.dll -Destination output\dist\antigravity-proxy\version.dll -Force
+          .\tests\test-launcher-lifetime.ps1 -LauncherExecutable output\dist\AgentProxyLauncher.exe
+
+      - name: Build and verify portable single-EXE AgentProxy.exe
+        shell: powershell
+        run: |
+          $rawRev = if ($env:GITHUB_REF_NAME -and $env:GITHUB_REF -like 'refs/tags/*') { $env:GITHUB_REF_NAME } else { "ci-$($env:GITHUB_RUN_NUMBER)" }
+          $rev = ($rawRev.ToLowerInvariant() -replace '[^a-z0-9-]', '-').Trim('-')
+          if ($rev.Length -gt 48) { $rev = $rev.Substring(0, 48).Trim('-') }
+          if (-not $rev) { $rev = 'ci-build' }
+          .\scripts\build-portable.ps1 -OutputDirectory output\portable-ci -NativePackage output\enhanced\package -NativeArtifactsSource output\enhanced\NativeArtifacts.generated.cs -Revision $rev
+          $p = Start-Process -FilePath output\portable-ci\AgentProxy.exe -ArgumentList '--verify-payload' -Wait -PassThru
+          if ($p.ExitCode -ne 0) { throw 'Portable payload verification failed.' }
+          .\tests\test-launcher-lifetime.ps1 -LauncherExecutable output\portable-ci\payload\AgentProxyLauncher.exe
+
+      - name: Upload build artifacts
+        uses: actions/upload-artifact@v4
+        with:
+          name: AgentProxy-win-x64
+          retention-days: 14
+          path: |
+            output/portable-ci/AgentProxy.exe
+            output/portable-ci/AgentProxy.exe.sha256
+            output/AgentProxy-Enhanced-win-x64.zip
+            output/AgentProxy-Enhanced-win-x64.zip.sha256
+
+      - name: Publish GitHub Release
+        if: startsWith(github.ref, 'refs/tags/v')
+        uses: softprops/action-gh-release@v2
+        with:
+          files: |
+            output/portable-ci/AgentProxy.exe
+            output/portable-ci/AgentProxy.exe.sha256
+            output/AgentProxy-Enhanced-win-x64.zip
+            output/AgentProxy-Enhanced-win-x64.zip.sha256
+          generate_release_notes: true

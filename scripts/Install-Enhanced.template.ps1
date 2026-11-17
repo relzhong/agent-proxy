@@ -3,7 +3,7 @@ $ErrorActionPreference='Stop'
 if (-not [Environment]::Is64BitProcess) { throw 'Use 64-bit Windows PowerShell.' }
 $bundleId='@@BUNDLE@@'
 $expected=ConvertFrom-Json '@@FILES@@'
-$root=Join-Path ([Environment]::GetFolderPath('ProgramFiles')) 'LaunchDeckProcessProxy'
+$root=Join-Path ([Environment]::GetFolderPath('ProgramFiles')) 'AgentProxyProcessProxy'
 $destination=Join-Path $root $bundleId
 $admins=[Security.Principal.SecurityIdentifier]'S-1-5-32-544'
 $system=[Security.Principal.SecurityIdentifier]'S-1-5-18'
@@ -49,7 +49,7 @@ try {
   $powershell=Join-Path ([Environment]::SystemDirectory) 'WindowsPowerShell\v1.0\powershell.exe'
   $process=Start-Process -FilePath $powershell -Verb RunAs -ArgumentList ('-NoProfile -File "'+$PSCommandPath+'" -Elevated') -WorkingDirectory ([Environment]::SystemDirectory) -WindowStyle Hidden -PassThru
   $process.WaitForExit();if($process.ExitCode -ne 0) { throw 'Installation stopped. Do not retry until the reported conflict is resolved.' }
-  Write-Host ('Installed: '+$destination+'\ChatGPTProxyLauncher.exe');return
+  Write-Host ('Installed: '+$destination+'\AgentProxyLauncher.exe');return
  }
  $principal=[Security.Principal.WindowsPrincipal]::new([Security.Principal.WindowsIdentity]::GetCurrent())
  if(!$principal.IsInRole([Security.Principal.WindowsBuiltInRole]::Administrator)) { throw 'Normal administrator approval was not obtained.' }

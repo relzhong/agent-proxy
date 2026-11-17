@@ -1,207 +1,121 @@
-<p align="center">
-  <img src="docs/images/banner.png" alt="Codex Proxy Launch Deck - 一次启动，代理、主题与 AI 创作同时就绪" width="100%">
-</p>
+<h1 align="center">Agent Proxy (agent-proxy)</h1>
 
 <p align="center">
   <strong>简体中文</strong> · <a href="README.en.md">English</a>
 </p>
 
 <p align="center">
-  <a href="https://github.com/gaopengbin/codex-launch-deck/releases/latest"><img src="https://img.shields.io/github/v/release/gaopengbin/codex-launch-deck?style=flat-square&color=cfff32" alt="最新版本"></a>
-  <a href="https://github.com/gaopengbin/codex-launch-deck/releases"><img src="https://img.shields.io/github/downloads/gaopengbin/codex-launch-deck/total?style=flat-square&color=31c9b2" alt="累计下载"></a>
-  <img src="https://img.shields.io/badge/Windows-10%20%7C%2011-0b7668?style=flat-square" alt="Windows 10 / 11">
-  <a href="LICENSE"><img src="https://img.shields.io/github/license/gaopengbin/codex-launch-deck?style=flat-square&color=173d34" alt="MIT License"></a>
+  <a href="https://github.com/relzhong/agent-proxy/actions"><img src="https://img.shields.io/github/actions/workflow/status/relzhong/agent-proxy/ci-release.yml?style=flat-square" alt="CI Status"></a>
+  <img src="https://img.shields.io/badge/Windows-10%20%7C%2011%20x64-0b7668?style=flat-square" alt="Windows 10 / 11 x64">
+  <a href="LICENSE"><img src="https://img.shields.io/github/license/relzhong/agent-proxy?style=flat-square" alt="License"></a>
 </p>
 
 <p align="center">
-  <strong>Windows 上的 Codex 启动与主题工作台。</strong><br>
-  通过本地代理启动 Codex，不修改 Windows 系统代理；浏览、安装、即时切换 CodeDrobe 主题，并复用本机已登录的 Codex 创作完整主题。
+  面向 Windows 桌面端 AI 客户端的统一免全局代理启动器，同时支持 <strong>ChatGPT / Codex（Microsoft Store 版）</strong> 与 <strong>Antigravity（桌面版）</strong>，无需开启系统代理或 TUN 模式。
 </p>
 
-<p align="center">
-  <a href="https://github.com/gaopengbin/codex-launch-deck/releases/latest"><strong>下载 Windows 免安装版</strong></a>
-  &nbsp;·&nbsp;
-  <a href="https://codedrobe.app">CodeDrobe 主题商店</a>
-  &nbsp;·&nbsp;
-  <a href="#快速开始">快速开始</a>
-</p>
+---
 
-<p align="center">
-  <img src="docs/images/theme-gallery.png" alt="Codex Proxy Launch Deck 主题商店" width="92%">
-</p>
+## 核心特性
 
-## v2.4.5 免安装自动更新兼容修复版
+- **双客户端统一入口**
+  - **ChatGPT / Codex (Store)**：保留应用包身份激活与注册表环境变量瞬时注入/恢复，内置浏览器（CUA）转发与读取兼容修复。
+  - **Antigravity (Desktop)**：内置 `version.dll` 进程级代理注入，自动生成并同步 `%LOCALAPPDATA%\Programs\Antigravity\config.json`（静默加载、自动覆盖 `Antigravity.exe` 与 `language_server.exe`），每次启动校验并自动补回被更新清除的 `version.dll`，支持一键移除补丁。
+- **支持本机与局域网代理地址**
+  - 放宽回环地址限制，支持填写 `127.0.0.1` 或局域网/单播 IPv4（如 `192.168.x.x`）。
+  - 非回环上游 IP 会自动加入直连排除规则与 `NO_PROXY` / `bypass-list`，防止代理流量回环。
+- **HTTP 与 SOCKS5 双协议支持**
+  - **Antigravity (Desktop)**：原生支持 `HTTP` 与 `SOCKS5`（无需驱动与管理员权限）。
+  - **ChatGPT / Codex (Store)**：
+    - **普通模式（默认不勾选增强代理）**：支持 `HTTP / Mixed` 端口，无需驱动、无需管理员 UAC 授权。*注意：SOCKS5 不支持普通模式 Codex / ChatGPT，界面会明确提示需勾选增强代理或改用 HTTP。*
+    - **增强模式（可选勾选，WinDivert + ProxyBridge）**：同时支持 `HTTP` 与 `SOCKS5`（含 OpenAI 域名 TLS SNI 主机名透传），自动追踪运行中的 Store 版本更新与延迟生成的 `codex.exe` / `node_repl.exe`。
 
-下载 [LaunchDeck.exe](https://github.com/gaopengbin/codex-launch-deck/releases/download/v2.4.5-portable/LaunchDeck.exe)，双击使用。修复 ChatGPT / Codex 在运行中自动升级后，增强代理仍沿用旧版程序路径的问题；每 15 秒检查运行中的版本及配套后台文件，校验后自动补齐代理规则，保留现有连接和代理引擎。
-
-便携版默认增强代理，无需勾选，不包含主题功能；保留浏览器修复、托盘保活和启动诊断。无需安装向导，首次准备受保护组件及启用驱动仍需 Windows 授权。
-
-详见 [修复说明](docs/releases/v2.4.5-portable.md) 和 [免安装使用说明](docs/portable.md)。下方主题工作台介绍适用于完整版和历史版本，当前免安装增强代理版不包含主题功能。
-
-## 它解决什么
-
-<table>
-  <tr>
-    <td width="33%" valign="top">
-      <strong>01 · 应用代理启动</strong><br><br>
-      通过 Windows 应用包入口启动 ChatGPT。启动期间短暂设置当前用户的代理环境变量，进程创建后立即恢复原值；不改系统代理。
-    </td>
-    <td width="33%" valign="top">
-      <strong>02 · 主题商店与即时换肤</strong><br><br>
-      搜索、安装和管理 CodeDrobe 主题。Codex 已经运行时也能直接切换，并由 watcher 在渲染器刷新后自动恢复主题。
-    </td>
-    <td width="33%" valign="top">
-      <strong>03 · 本地 Codex AI 创作</strong><br><br>
-      复用电脑上已登录的 Codex CLI，根据文字或参考图生成 <code>.codedrobe-theme</code>，无需额外配置模型供应商或 API Key。
-    </td>
-  </tr>
-</table>
-
-## 核心亮点
-
-- **一次启动，同时就绪**：代理连通性检测、Codex 启动、主题校验与应用合并为一条链路。
-- **启动后恢复原值**：为让 Windows 应用包继承代理，启动器会短暂设置当前用户的代理环境变量，随后恢复。极短的启动窗口内，其他同时启动的应用也可能读到这些值。
-- **运行中即时切换主题**：无需重启 Codex，自动同步主题要求的原生浅色/深色外观。
-- **完整组件覆盖**：主题覆盖主界面、右侧输出/来源面板、Tooltip、Popover、Dropdown、Menu、Listbox 与 Dialog。
-- **真实主题商店**：支持搜索、排序、下载进度、完整性校验、本地缓存与离线内置主题。
-- **AI 主题生成闭环**：支持纯 CSS、上传参考图、AI 背景三种模式，自动校验、打包并加入本地主题库。
-- **可靠的运行状态识别**：准确区分残留端口、Codex 主进程和渲染器状态，减少“未启动却被判定为运行中”。
-- **托盘后台与安全更新**：关闭窗口后继续在系统托盘守护主题，自动检查签名更新并支持应用内下载安装。
-- **随时可恢复**：一键恢复 Codex 原生外观，同时清理持久化主题 watcher。
-
-## 界面与效果
-
-<table>
-  <tr>
-    <td width="50%" align="center"><strong>复用本地 Codex 创作主题</strong></td>
-    <td width="50%" align="center"><strong>主题实际应用到 Codex</strong></td>
-  </tr>
-  <tr>
-    <td><img src="docs/images/ai-theme-creation.png" alt="AI 主题创作流程"></td>
-    <td><img src="docs/images/theme-applied-codex.png" alt="主题应用后的 Codex 界面"></td>
-  </tr>
-</table>
-
-## v2.3.2 更新
-
-- 适配新版 ChatGPT Windows 应用包：通过注册的应用入口启动，修复直接执行 `ChatGPT.exe` 时“该进程没有程序包标识符”的报错。
-- 启动时短暂设置当前用户的代理环境变量，并在应用进程创建后恢复原值；同时为 ChatGPT 传递代理参数。
-- 新版安装包内置启动辅助程序；旧版启动器请下载 ZIP，保留两个 EXE 在同一目录。
-
-## v2.3.1 更新
-
-- 修复部分 Microsoft Store 安装的 Codex / ChatGPT 启动时报“拒绝访问（错误码 5）”的问题：直接启动失败时，自动尝试应用包身份兼容启动。
-- 在应用包上下文中显式传递代理环境变量，不修改 Windows 系统代理。
-- 隐藏兼容启动辅助进程，避免启动时短暂闪出 PowerShell 黑框。
-- 同步修复新版桌面启动器与旧版轻量启动器，相关反馈见 [#10](https://github.com/gaopengbin/codex-launch-deck/issues/10)。
-
-> 兼容路径依赖 Windows 的 `Invoke-CommandInDesktopPackage` 与 Windows Script Host；企业策略禁用相关组件时仍可能无法使用。
-
-## v2.3.0 更新
-
-- 新增 Windows 系统托盘，关闭主窗口后继续在后台运行，可从托盘打开、检查更新或彻底退出。
-- 新增单实例唤醒，重复启动 Launch Deck 不再产生多个后台进程。
-- 新增应用内更新、下载进度与 Windows 原生更新通知。
-- Release 自动生成签名安装包和 `latest.json`，客户端会在安装前校验更新签名。
-- 后台检查失败保持安静，手动检查失败使用简洁中文提示，不再暴露底层网络错误。
-
-## v2.1.1 更新
-
-- AI 主题生成器新增完整组件覆盖契约，避免右侧面板和悬浮层保留系统灰色。
-- 自动覆盖 Tooltip、Popover、菜单、下拉列表、对话框及其 hover/highlighted 状态。
-- 修复 Microsoft Store 内置 CLI 无法由外部程序执行的问题，自动寻找可用的 Codex CLI。
-- AI 创作任务继承启动器代理配置，代理环境下不再因 CLI 拒绝访问而失败。
-- Codex 刚启动、DOM 尚未稳定时自动等待并重试主题应用。
+---
 
 ## 快速开始
 
-1. 在本地代理软件中开启 **HTTP** 或 **Mixed** 端口。
-2. 从 [最新 Release](https://github.com/gaopengbin/codex-launch-deck/releases/latest) 安装并打开 Launch Deck。
-3. 填写代理主机和端口，点击检测。
-4. 选择主题，点击 **启动 Codex**；如果 Codex 已通过 CDP 运行，可直接点击 **即时应用主题**。
+1. 从 [Releases](https://github.com/relzhong/agent-proxy/releases) 下载单文件免安装版 **`AgentProxy.exe`**（或从 CI 构建产物获取）。
+2. 完全退出目标客户端（ChatGPT / Codex 或 Antigravity）。
+3. 双击运行 `AgentProxy.exe`：
+   - 选择 **启动目标**：`ChatGPT / Codex (Store)` 或 `Antigravity (Desktop)`。
+   - 填写 **代理主机**（本机 `127.0.0.1` 或局域网 IP）、**代理端口** 及 **代理协议**（`HTTP` / `SOCKS5`）。
+   - 若启动 **ChatGPT / Codex** 且仅使用 `HTTP / Mixed` 端口，可直接点击 **启动 ChatGPT / Codex**；若使用纯 `SOCKS5` 或需要驱动级 443 兜底，请勾选 **启用增强代理**。
+   - 若启动 **Antigravity**，选择 `HTTP` 或 `SOCKS5` 后点击 **部署代理并启动 Antigravity**（不需要管理员权限）。
 
-> 如果代理软件提供的是 SOCKS 端口，请改用它的 HTTP/Mixed 端口。Launch Deck 传递的是 HTTP 代理 URL。
+> 详细安全边界与组件校验机制参见 [免安装说明](docs/portable.md) 与 [增强代理技术文档](docs/process-proxy.md)。
 
-## 下载选择
+---
 
-| 文件 | 适合场景 |
-| --- | --- |
-| `Codex.Proxy.Launch.Deck_*_x64-setup.exe` | 推荐，大多数 Windows 用户使用的 NSIS 安装包 |
-| `Codex.Proxy.Launch.Deck_*_x64_en-US.msi` | 适合 MSI 部署与企业安装环境 |
-| `ChatGPTProxyLauncher-Legacy-win-x64.zip` | 旧版启动器、必需的启动辅助程序、内置主题与快捷方式脚本合集 |
-
-公开二进制目前尚未进行代码签名，Windows SmartScreen 可能显示安全提示。请始终从本仓库 Release 页面下载。
-
-## AI 主题创作
-
-1. 打开侧栏 **AI 创作**。
-2. 输入视觉描述，选择主题需要的 **浅色** 或 **深色** Codex 基底。
-3. 选择视觉模式：**纯 CSS**、**上传参考图** 或 **AI 生成图**。
-4. 启动创作并查看实时进度。完成后 Launch Deck 会校验主题结构、组件覆盖、背景素材和卡片封面，然后自动加入本地主题库。
-
-生成的主题保存在：
+## 目录结构
 
 ```text
-%LOCALAPPDATA%\CodexProxyLaunchDeck\themes
+agent-proxy/
+├── .github/workflows/ci-release.yml   # GitHub Actions 测试、构建与 Release 发布
+├── assets/                            # 应用图标
+├── docs/                              # 免安装与增强代理说明文档
+├── native/
+│   ├── antigravity-proxy/             # Antigravity version.dll C/C++ 源码 (BSD-2-Clause)
+│   └── proxybridge/                   # ProxyBridge.dll C 源码 (MIT)
+├── scripts/                           # 原生编译、增强包与单文件便携包构建脚本
+├── src/
+│   ├── Antigravity/                   # Antigravity 启动、config.json 与 version.dll 管理
+│   ├── Codex/                         # Store 版 ChatGPT/Codex 激活与 CUA 浏览器维护
+│   ├── Launcher/                      # WinForms 主界面、便携引导与诊断日志
+│   └── ProcessProxy/                  # WinDivert 进程代理控制、权限校验与 Broker
+├── tests/                             # C# 与原生 C/C++ 自动化回归测试
+└── build.ps1                          # 本地快速编译独立运行目录 (output/dist)
 ```
 
-主题创作需要 CodeDrobe 主题 Skill。Launch Deck 会自动检测，并可为当前用户安装该能力。
+---
 
-<details>
-<summary><strong>与 Cockpit Tools 配合使用</strong></summary>
+## 本地编译与测试
 
-如果 Codex 由 [Cockpit Tools](https://github.com/jlcodes99/cockpit-tools) 启动，需要在默认实例的 **自定义启动参数** 中加入：
+前置条件：Windows 10/11 x64、.NET Framework 4.x（系统自带 `csc.exe`）、Visual Studio 2022（C++ x64 工具链 `cl.exe`）、Python 3。
 
-```text
---remote-debugging-port=9335
-```
-
-保存后完全退出所有 Codex 窗口和后台进程，再通过 Cockpit Tools 启动。Launch Deck 会从进程命令行自动识别 CDP 端口；如果 `9335` 被占用，可换成其他空闲端口。
-
-请勿把参数填写到 **设置 > Codex 启动路径**，该字段只能填写可执行文件路径。
-
-</details>
-
-<details>
-<summary><strong>为什么显式代理能改善 Windows Codex 连接</strong></summary>
-
-- [Windows WebSocket transport works with explicit proxy environment variables](https://github.com/openai/codex/issues/29958)
-- [Windows mobile remote control requires proxy environment variables](https://github.com/openai/codex/issues/29233)
-- [WebSocket failures exhaust retries before HTTP fallback](https://github.com/openai/codex/issues/19821)
-- [Windows Codex recovers with an explicit HTTP proxy](https://github.com/openai/codex/issues/20844)
-
-</details>
-
-## 隐私与安全
-
-Launch Deck 不转发、不读取网络流量，只检查指定代理端点是否可连接。为启动新版 Windows 应用包，它会短暂设置当前用户的代理环境变量，在进程创建后恢复原值；不会修改 Windows 系统代理。AI 主题生成时，用户选择的参考图片只会交给明确启动的本地 Codex 任务；Launch Deck 不会将图片上传到自己的服务。
-
-## 本地构建
+### 1. 运行自动化测试
 
 ```powershell
-cd desktop
-npm ci
-npm run lint
-npm run build
-npm run tauri build
+.\tests\test-antigravity-launcher.ps1
+.\tests\test-process-proxy.ps1
+.\tests\test-native-process-proxy.ps1
+.\tests\test-tls-proxy.ps1
+.\tests\test-cua-forwarding.ps1
+.\tests\test-browser-launch-policy.ps1
+.\tests\test-activation-handoff.ps1
 ```
+
+### 2. 编译独立运行目录（含普通模式 + Antigravity `version.dll`，不拉取 WinDivert）
 
 ```powershell
-cd desktop\src-tauri
-cargo test --locked
-cargo clippy --locked --all-targets --all-features -- -D warnings
+.\build.ps1 -OutputDirectory .\output\dist
+.\tests\test-launcher-lifetime.ps1 -LauncherExecutable .\output\dist\AgentProxyLauncher.exe
 ```
 
-构建旧版 .NET Framework 启动器：
+### 3. 编译完整单文件免安装版 `AgentProxy.exe`（含 WinDivert 增强模式）
 
 ```powershell
-powershell -ExecutionPolicy Bypass -File .\build.ps1
+.\scripts\build-process-proxy.ps1 -OutputRoot .\output\enhanced
+.\scripts\build-portable.ps1 -OutputDirectory .\output\portable -NativePackage .\output\enhanced\package -NativeArtifactsSource .\output\enhanced\NativeArtifacts.generated.cs
 ```
 
-## License
+> 提示：由于 `WinDivert` 属于底层网络拦截驱动库，Windows Defender 可能会在编译或解包时误报，按需将工作区或发布目录加入排除项即可。
 
-[MIT](LICENSE)
+---
 
-## v2.4.0 enhanced process proxy
+## 上游项目与致谢 (Citations & Acknowledgments)
 
-The separate `LaunchDeck-Enhanced-win-x64.zip` contains the Windows C# launcher with an optional unified process proxy for the desktop client's TCP 443/WebSocket traffic. The Tauri installers retain the ordinary proxy environment fix; their UI does not yet include enhanced mode. Read [scope, installation, licenses and remaining stop validation](docs/process-proxy.md) before installing. Existing system proxy, TUN and autostart settings are not changed.
+本项目整合与基于以下开源项目构建，特此引用并致谢：
+
+- **[gaopengbin/codex-launch-deck](https://github.com/gaopengbin/codex-launch-deck)**（`v2.4.5-portable`，MIT License）
+  提供 Microsoft Store 版 ChatGPT / Codex 激活、环境变量瞬时注入与恢复、CUA 浏览器代理/读取修复、以及基于 WinDivert + ProxyBridge 的增强进程代理架构与安全校验体系。
+- **[yuaotian/antigravity-proxy](https://github.com/yuaotian/antigravity-proxy)**（BSD-2-Clause License）
+  提供针对 Antigravity 的 `version.dll`（MinHook + FakeIP + 子进程注入）网络代理实现，支持 HTTP / SOCKS5 与 `language_server.exe` 透明代理。
+- **底层原生组件**：
+  - [InterceptSuite/ProxyBridge](https://github.com/InterceptSuite/ProxyBridge)（MIT License）
+  - [basil00/WinDivert](https://github.com/basil00/WinDivert)（LGPLv3 / GPLv2）
+
+---
+
+## 许可证
+
+启动器托管代码与修改部分采用 [MIT License](LICENSE)；内嵌及整合的第三方组件保留其各自开源许可证（MIT / BSD-2-Clause / LGPLv3）。

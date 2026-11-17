@@ -17,9 +17,9 @@ $bundleId=$nativeId+'-'+$Revision
 $generated=Join-Path $OutputDirectory 'NativeArtifacts.generated.cs'
 [IO.File]::WriteAllText($generated,$source.Replace('BundleId="'+$nativeId+'"','BundleId="'+$bundleId+'"'),[Text.UTF8Encoding]::new($true))
 $payload=Join-Path $OutputDirectory 'payload'
-& "$repo\build.ps1" -OutputDirectory $payload -NativeArtifactsSource $generated
+& "$repo\build.ps1" -OutputDirectory $payload -NativeArtifactsSource $generated -SkipAntigravityNative
 if($LASTEXITCODE -ne 0){throw 'Portable launcher compilation failed.'}
-foreach($name in @('process-proxy-native','LICENSES','SOURCE')){
+foreach($name in @('process-proxy-native','antigravity-proxy','LICENSES','SOURCE')){
  Copy-Item -LiteralPath (Join-Path $NativePackage $name) -Destination $payload -Recurse
 }
 Copy-Item -LiteralPath "$repo\docs\process-proxy.md" -Destination (Join-Path $payload 'README.md')
@@ -43,10 +43,10 @@ try{
  }
 }finally{$zip.Dispose()}
 $compiler=Join-Path ([Environment]::GetFolderPath('Windows')) 'Microsoft.NET\Framework64\v4.0.30319\csc.exe'
-$exe=Join-Path $OutputDirectory 'LaunchDeck.exe'
+$exe=Join-Path $OutputDirectory 'AgentProxy.exe'
 $common=@('/nologo','/platform:x64','/optimize+','/reference:System.Web.Extensions.dll','/reference:System.Windows.Forms.dll','/reference:System.IO.Compression.dll','/reference:System.IO.Compression.FileSystem.dll',
  "/resource:$zipPath,payload.zip","/resource:$embeddedManifest,manifest.json",
- "$repo\src\PortableBootstrap.cs","$repo\src\ProcessProxy.cs","$repo\src\ProcessProxySecurity.cs","$repo\src\ProcessProxyDiagnostic.cs",$generated)
+ "$repo\src\Launcher\PortableBootstrap.cs","$repo\src\ProcessProxy\ProcessProxy.cs","$repo\src\ProcessProxy\ProcessProxySecurity.cs","$repo\src\ProcessProxy\ProcessProxyDiagnostic.cs",$generated)
 & $compiler /target:winexe "/win32icon:$repo\assets\app-icon.ico" "/out:$exe" @common
 if($LASTEXITCODE -ne 0){throw 'Portable bootstrap compilation failed.'}
 $tests=Join-Path $OutputDirectory 'PortableTests.exe'
@@ -54,5 +54,5 @@ $tests=Join-Path $OutputDirectory 'PortableTests.exe'
 if($LASTEXITCODE -ne 0){throw 'Portable tests compilation failed.'}
 & $tests
 if($LASTEXITCODE -ne 0){throw 'Portable verification failed.'}
-((Get-FileHash -LiteralPath $exe).Hash+'  LaunchDeck.exe')|Set-Content -LiteralPath ($exe+'.sha256') -Encoding ASCII
+((Get-FileHash -LiteralPath $exe).Hash+'  AgentProxy.exe')|Set-Content -LiteralPath ($exe+'.sha256') -Encoding ASCII
 Write-Host "Portable single EXE built and verified: $exe"

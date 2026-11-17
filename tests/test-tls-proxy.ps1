@@ -2,7 +2,7 @@ param([string]$OutputDirectory)
 $ErrorActionPreference='Stop'
 $repo=Split-Path -Parent $PSScriptRoot
 . "$repo\scripts\msvc-environment.ps1"
-if(!$OutputDirectory){$OutputDirectory=Join-Path ([IO.Path]::GetTempPath()) ('launchdeck-tls-tests-'+[guid]::NewGuid().ToString('N'))}
+if(!$OutputDirectory){$OutputDirectory=Join-Path ([IO.Path]::GetTempPath()) ('agentproxy-tls-tests-'+[guid]::NewGuid().ToString('N'))}
 if(Test-Path -LiteralPath $OutputDirectory){throw 'Use a fresh test output directory.'}
 New-Item -ItemType Directory -Path $OutputDirectory | Out-Null
 Push-Location $OutputDirectory

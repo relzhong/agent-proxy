@@ -4,8 +4,8 @@ using System.IO.Compression;
 using System.Reflection;
 using System.Security.AccessControl;
 using System.Security.Principal;
-using LaunchDeck.Portable;
-using LaunchDeck.ProcessProxy;
+using AgentProxy.Portable;
+using AgentProxy.ProcessProxy;
 
 internal static class PortableTests
 {
@@ -16,7 +16,7 @@ internal static class PortableTests
     {
         try
         {
-            string directory=Path.Combine(Path.GetTempPath(),"LaunchDeck-portable-test-"+Guid.NewGuid().ToString("N"));
+            string directory=Path.Combine(Path.GetTempPath(),"AgentProxy-portable-test-"+Guid.NewGuid().ToString("N"));
             foreach(string bad in new[]{"../escape","a/../../escape","C:/escape","/absolute","\\absolute","a//b","a/./b","a./file","a /file","file:stream"})
                 Reject(()=>Bootstrap.SafeTarget(directory,bad),"reject path "+bad);
             using(var payload=Assembly.GetExecutingAssembly().GetManifestResourceStream("payload.zip"))
@@ -30,7 +30,7 @@ internal static class PortableTests
                 }
                 Check(!File.Exists(Path.Combine(directory,"Install-Enhanced.ps1")),"no installer payload");
                 Bootstrap.Materialize(archive,manifest,directory,false);checks++;
-                string exe=Path.Combine(directory,"ChatGPTProxyLauncher.exe");File.AppendAllText(exe,"corrupt");
+                string exe=Path.Combine(directory,"AgentProxyLauncher.exe");File.AppendAllText(exe,"corrupt");
                 Reject(()=>Bootstrap.Materialize(archive,manifest,directory,false),"modified cached EXE rejected");
                 Reject(()=>Bootstrap.Materialize(archive,manifest,directory,true),"arbitrary privileged destination rejected");
             }

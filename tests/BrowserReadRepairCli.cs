@@ -1,5 +1,5 @@
 using System;
-using ChatGPTProxyLauncherLite;
+using AgentProxy;
 internal static class BrowserReadRepairCli
 {
     static int Main(string[] args)

@@ -10,7 +10,7 @@ if(!$DependencyCache){$DependencyCache=Join-Path $OutputRoot 'dependencies'}
 New-Item -ItemType Directory -Force -Path $DependencyCache | Out-Null
 function Dependency($name,$url,$hash){
  $path=Join-Path $DependencyCache $name
- if(!(Test-Path -LiteralPath $path)){[Net.ServicePointManager]::SecurityProtocol=[Net.SecurityProtocolType]::Tls12;Invoke-WebRequest -Uri $url -OutFile $path -UseBasicParsing -Headers @{'User-Agent'='LaunchDeck-release-build'}}
+ if(!(Test-Path -LiteralPath $path)){[Net.ServicePointManager]::SecurityProtocol=[Net.SecurityProtocolType]::Tls12;Invoke-WebRequest -Uri $url -OutFile $path -UseBasicParsing -Headers @{'User-Agent'='AgentProxy-release-build'}}
  if((Get-FileHash -LiteralPath $path -Algorithm SHA256).Hash -ne $hash){throw "Dependency hash mismatch: $name"}
  return $path
 }
@@ -30,10 +30,12 @@ $pins=[ordered]@{ 'ProxyBridge.dll'=(Get-FileHash "$compile\ProxyBridge.dll").Ha
 $bundleId=$pins['ProxyBridge.dll'].Substring(0,16).ToLowerInvariant()
 $generated=Join-Path $OutputRoot 'NativeArtifacts.generated.cs'
 $pairs=($pins.GetEnumerator()|ForEach-Object{'{"'+$_.Key+'","'+$_.Value+'"}'}) -join ','
-('namespace LaunchDeck.ProcessProxy { internal static class NativeArtifacts { public const string BundleId="'+$bundleId+'"; public const string DriverSigner="043589F75FCE2795E7F2CC3E526D46784D5DDAB3"; public static System.Collections.Generic.Dictionary<string,string> Pins(){return new System.Collections.Generic.Dictionary<string,string>{'+$pairs+'};} } }') | Set-Content -LiteralPath $generated -Encoding UTF8
+('namespace AgentProxy.ProcessProxy { internal static class NativeArtifacts { public const string BundleId="'+$bundleId+'"; public const string DriverSigner="043589F75FCE2795E7F2CC3E526D46784D5DDAB3"; public static System.Collections.Generic.Dictionary<string,string> Pins(){return new System.Collections.Generic.Dictionary<string,string>{'+$pairs+'};} } }') | Set-Content -LiteralPath $generated -Encoding UTF8
 $package=Join-Path $OutputRoot 'package';New-Item -ItemType Directory $package | Out-Null
-& "$repo\build.ps1" -OutputDirectory $package -NativeArtifactsSource $generated
+& "$repo\build.ps1" -OutputDirectory $package -NativeArtifactsSource $generated -SkipAntigravityNative
 if($LASTEXITCODE -ne 0){throw 'Managed release compilation failed.'}
+& "$PSScriptRoot\build-antigravity-proxy.ps1" -OutputDirectory (Join-Path $package 'antigravity-proxy')
+if($LASTEXITCODE -ne 0){throw 'Antigravity proxy compilation failed.'}
 $native=Join-Path $package 'process-proxy-native';New-Item -ItemType Directory $native | Out-Null
 Copy-Item "$compile\ProxyBridge.dll","$wd\x64\WinDivert.dll","$wd\x64\WinDivert64.sys" $native
 $signature=Get-AuthenticodeSignature -LiteralPath "$native\WinDivert64.sys"
@@ -46,16 +48,18 @@ $files['bundle-manifest.json']=(Get-FileHash $manifest).Hash
 $template=Get-Content "$PSScriptRoot\Install-Enhanced.template.ps1" -Raw
 $template.Replace('@@BUNDLE@@',$bundleId).Replace('@@FILES@@',($files|ConvertTo-Json -Compress)) | Set-Content "$package\Install-Enhanced.ps1" -Encoding UTF8
 New-Item -ItemType Directory "$package\LICENSES","$package\SOURCE" | Out-Null
-Copy-Item "$repo\LICENSE" "$package\LICENSES\LaunchDeck-MIT.txt"
+Copy-Item "$repo\LICENSE" "$package\LICENSES\AgentProxy-MIT.txt"
 Copy-Item "$core\LICENSE" "$package\LICENSES\ProxyBridge-MIT.txt"
+Copy-Item "$repo\native\antigravity-proxy\LICENSE.txt" "$package\LICENSES\AntigravityProxy-BSD-2-Clause.txt"
 Copy-Item "$wd\LICENSE" "$package\LICENSES\WinDivert-LICENSE.txt"
 Copy-Item $sourceZip "$package\SOURCE\WinDivert-v2.2.2-source.zip"
 Copy-Item $core "$package\SOURCE\proxybridge" -Recurse
+Copy-Item "$repo\native\antigravity-proxy" "$package\SOURCE\antigravity-proxy" -Recurse
 Copy-Item "$repo\docs\process-proxy.md" "$package\README.md"
 @{BundleId=$bundleId;DriverSignature=$signature.Status.ToString();DriverSigner=$signature.SignerCertificate.Subject;DriverThumbprint=$signature.SignerCertificate.Thumbprint;DriverSHA256=$pins['WinDivert64.sys'];ProxyBridgeUpstream='02703a0672a8b94011a4698368a392f7734c10dc';WinDivertVersion='2.2.2-A';DriverLoaded=$false} | ConvertTo-Json | Set-Content "$package\provenance.json" -Encoding UTF8
 $checksums=Get-ChildItem $package -File -Recurse | Sort-Object FullName | ForEach-Object{(Get-FileHash $_.FullName).Hash+'  '+$_.FullName.Substring($package.Length+1).Replace('\','/')}
 $checksums | Set-Content "$package\SHA256SUMS.txt" -Encoding ASCII
-$zip=Join-Path (Split-Path -Parent $OutputRoot) 'LaunchDeck-Enhanced-win-x64.zip'
+$zip=Join-Path (Split-Path -Parent $OutputRoot) 'AgentProxy-Enhanced-win-x64.zip'
 if(Test-Path $zip){throw 'Release ZIP already exists; refusing overwrite.'}
 Compress-Archive -Path "$package\*" -DestinationPath $zip
 ((Get-FileHash $zip).Hash+'  '+[IO.Path]::GetFileName($zip)) | Set-Content ($zip+'.sha256') -Encoding ASCII

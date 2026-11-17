@@ -5,7 +5,7 @@ using System.IO;
 using System.Linq;
 using System.Text;
 using System.Threading;
-using LaunchDeck.ProcessProxy;
+using AgentProxy.ProcessProxy;
 class DiagnosticTests
 {
     static int checks;
