@@ -128,15 +128,44 @@ int ld_tls_peek_server_name(SOCKET client, char *host, size_t capacity, DWORD ti
     return result == 1;
 }
 
-/* Enhanced mode uses an unauthenticated loopback HTTP proxy. Read only headers,
-   preserving any tunneled bytes that follow them in the same TCP segment. */
-int ld_tls_http_connect(SOCKET proxy, const char *host, unsigned short port, int *status, DWORD *error)
+static void ld_tls_base64_encode(const char *input, size_t input_len, char *output, size_t output_size)
 {
-    char request[600], response[8193]; int written = 0, used = 0;
+    static const char tbl[] = "ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789+/";
+    size_t out = 0;
+    for (size_t i = 0; i < input_len && out + 4 < output_size; i += 3) {
+        unsigned char b1 = (unsigned char)input[i];
+        unsigned char b2 = (i + 1 < input_len) ? (unsigned char)input[i + 1] : 0;
+        unsigned char b3 = (i + 2 < input_len) ? (unsigned char)input[i + 2] : 0;
+        output[out++] = tbl[b1 >> 2];
+        output[out++] = tbl[((b1 & 0x03) << 4) | (b2 >> 4)];
+        output[out++] = (i + 1 < input_len) ? tbl[((b2 & 0x0F) << 2) | (b3 >> 6)] : '=';
+        output[out++] = (i + 2 < input_len) ? tbl[b3 & 0x3F] : '=';
+    }
+    output[out] = 0;
+}
+
+/* Read only headers, preserving any tunneled bytes that follow them in the same TCP segment. */
+int ld_tls_http_connect_auth(SOCKET proxy, const char *host, unsigned short port, const char *username, const char *password, int *status, DWORD *error)
+{
+    char request[2048], response[8193]; int written = 0, used = 0, length = 0;
     if (status) *status = 0;
     if (error) *error = 0;
     if (!host || !ld_tls_is_openai_host(host) || !port) return -1;
-    int length = snprintf(request, sizeof(request), "CONNECT %s:%u HTTP/1.1\r\nHost: %s:%u\r\nProxy-Connection: keep-alive\r\n\r\n", host, port, host, port);
+    if (username && username[0] != '\0') {
+        if (strpbrk(username, "\r\n")) return -1;
+        if (password && strpbrk(password, "\r\n")) return -1;
+        char creds[520], encoded[720];
+        int clen = snprintf(creds, sizeof(creds), "%s:%s", username, password ? password : "");
+        if (clen <= 0 || clen >= (int)sizeof(creds)) return -1;
+        ld_tls_base64_encode(creds, (size_t)clen, encoded, sizeof(encoded));
+        length = snprintf(request, sizeof(request),
+            "CONNECT %s:%u HTTP/1.1\r\nHost: %s:%u\r\nProxy-Authorization: Basic %s\r\nProxy-Connection: keep-alive\r\n\r\n",
+            host, port, host, port, encoded);
+    } else {
+        length = snprintf(request, sizeof(request),
+            "CONNECT %s:%u HTTP/1.1\r\nHost: %s:%u\r\nProxy-Connection: keep-alive\r\n\r\n",
+            host, port, host, port);
+    }
     if (length <= 0 || length >= (int)sizeof(request)) return -1;
     while (written < length) {
         int n = send(proxy, request+written, length-written, 0);
@@ -159,4 +188,9 @@ int ld_tls_http_connect(SOCKET proxy, const char *host, unsigned short port, int
         }
     }
     return -1;
+}
+
+int ld_tls_http_connect(SOCKET proxy, const char *host, unsigned short port, int *status, DWORD *error)
+{
+    return ld_tls_http_connect_auth(proxy, host, port, NULL, NULL, status, error);
 }

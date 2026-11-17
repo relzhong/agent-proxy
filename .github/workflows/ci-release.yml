@@ -27,6 +27,7 @@ jobs:
       - name: Run managed and Antigravity unit tests
         shell: powershell
         run: |
+          .\tests\test-launcher-settings.ps1
           .\tests\test-antigravity-launcher.ps1
           .\tests\test-process-proxy.ps1
           .\tests\test-cua-forwarding.ps1

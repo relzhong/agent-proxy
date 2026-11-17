@@ -32,7 +32,7 @@ namespace AgentProxy
             throw new ArgumentException("Unsupported Antigravity proxy protocol: " + protocol);
         }
 
-        internal static void ValidateEndpoint(string host, int port, string protocol)
+        internal static void ValidateEndpoint(string host, int port, string protocol, string username = null, string password = null)
         {
             if (String.IsNullOrWhiteSpace(host) || host.Length > 255
                 || host.IndexOfAny(new[] { ' ', '\t', '\r', '\n', '\0', '/', '\\', ':' }) >= 0 && !IsLiteralIpv6(host))
@@ -40,6 +40,10 @@ namespace AgentProxy
             if (port < 1 || port > 65535)
                 throw new ArgumentException("Invalid proxy port.");
             NormalizeProtocol(protocol);
+            AgentProxy.ProcessProxy.ProxyPlan.ValidateCredential(username, "Proxy username");
+            AgentProxy.ProcessProxy.ProxyPlan.ValidateCredential(password, "Proxy password");
+            if (!String.IsNullOrEmpty(password) && String.IsNullOrEmpty(username))
+                throw new ArgumentException("Proxy password requires a proxy username.");
         }
 
         private static bool IsLiteralIpv6(string host)
@@ -158,9 +162,9 @@ namespace AgentProxy
             return false;
         }
 
-        internal static string BuildConfigJson(string existingJson, string host, int port, string protocol)
+        internal static string BuildConfigJson(string existingJson, string host, int port, string protocol, string username = null, string password = null)
         {
-            ValidateEndpoint(host, port, protocol);
+            ValidateEndpoint(host, port, protocol, username, password);
             string normalizedHost = host.Trim();
             string normalizedProtocol = NormalizeProtocol(protocol);
             var serializer = new JavaScriptSerializer { MaxJsonLength = 1048576 };
@@ -187,8 +191,8 @@ namespace AgentProxy
             proxy["host"] = normalizedHost;
             proxy["port"] = port;
             proxy["type"] = normalizedProtocol;
-            if (!proxy.ContainsKey("username")) proxy["username"] = "";
-            if (!proxy.ContainsKey("password")) proxy["password"] = "";
+            proxy["username"] = username ?? "";
+            proxy["password"] = password ?? "";
 
             if (!root.ContainsKey("fake_ip"))
             {
@@ -314,7 +318,7 @@ namespace AgentProxy
             return Path.Combine(root, "antigravity-proxy", "version.dll");
         }
 
-        internal static void DeployAndWriteConfig(string executablePath, string host, int port, string protocol, string bundledDllPath = null)
+        internal static void DeployAndWriteConfig(string executablePath, string host, int port, string protocol, string bundledDllPath = null, string username = null, string password = null)
         {
             string dir = Path.GetDirectoryName(Path.GetFullPath(executablePath));
             string sourceDll = bundledDllPath ?? BundledDllPath();
@@ -330,7 +334,7 @@ namespace AgentProxy
 
             string configPath = Path.Combine(dir, "config.json");
             string existing = File.Exists(configPath) ? File.ReadAllText(configPath, new UTF8Encoding(false)) : null;
-            string updated = BuildConfigJson(existing, host, port, protocol);
+            string updated = BuildConfigJson(existing, host, port, protocol, username, password);
             File.WriteAllText(configPath, updated, new UTF8Encoding(false));
         }
 

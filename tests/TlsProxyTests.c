@@ -30,7 +30,7 @@ static void pair(SOCKET *a,SOCKET *b)
     *b=accept(listener,NULL,NULL);CHECK(*b!=INVALID_SOCKET);closesocket(listener);
     DWORD timeout=2000;setsockopt(*a,SOL_SOCKET,SO_RCVTIMEO,(char*)&timeout,sizeof(timeout));setsockopt(*b,SOL_SOCKET,SO_RCVTIMEO,(char*)&timeout,sizeof(timeout));
 }
-typedef struct {SOCKET socket;unsigned char bytes[1024];size_t size;int status;int matched;} Sender;
+typedef struct {SOCKET socket;unsigned char bytes[1024];size_t size;int status;int matched;const char *expected;} Sender;
 static DWORD WINAPI fragmented_hello(LPVOID arg)
 {
     Sender *s=(Sender*)arg;send(s->socket,(char*)s->bytes,3,0);Sleep(30);send(s->socket,(char*)s->bytes+3,(int)s->size-3,0);return 0;
@@ -39,7 +39,7 @@ static DWORD WINAPI proxy_reply(LPVOID arg)
 {
     Sender *s=(Sender*)arg;char request[1024];int used=0;
     while(used<(int)sizeof(request)-1){if(recv(s->socket,request+used,1,0)!=1)return 1;used++;if(used>=4&&!memcmp(request+used-4,"\r\n\r\n",4))break;}
-    request[used]=0;s->matched=!strcmp(request,"CONNECT codex-cloud-backend.chatgpt.com:443 HTTP/1.1\r\nHost: codex-cloud-backend.chatgpt.com:443\r\nProxy-Connection: keep-alive\r\n\r\n");
+    request[used]=0;const char *want=s->expected?s->expected:"CONNECT codex-cloud-backend.chatgpt.com:443 HTTP/1.1\r\nHost: codex-cloud-backend.chatgpt.com:443\r\nProxy-Connection: keep-alive\r\n\r\n";s->matched=!strcmp(request,want);
     char reply[128];sprintf_s(reply,sizeof(reply),"HTTP/1.1 %d Test\r\n\r\nZ",s->status);
     send(s->socket,reply,7,0);Sleep(10);send(s->socket,reply+7,(int)strlen(reply)-7,0);return 0;
 }
@@ -71,7 +71,15 @@ static void tests(void)
         CHECK(ld_tls_http_connect(a,"codex-cloud-backend.chatgpt.com",443,&status,&error)==(code==200?0:-1));CHECK(status==code);CHECK(error==0);
         CHECK(WaitForSingleObject(thread,2000)==WAIT_OBJECT_0);CloseHandle(thread);CHECK(sender.matched);char sentinel;CHECK(recv(a,&sentinel,1,0)==1&&sentinel=='Z');closesocket(a);closesocket(b);
     }
+    {pair(&a,&b);memset(&sender,0,sizeof(sender));sender.socket=b;sender.status=200;
+        sender.expected="CONNECT codex-cloud-backend.chatgpt.com:443 HTTP/1.1\r\nHost: codex-cloud-backend.chatgpt.com:443\r\nProxy-Authorization: Basic dXNlcjpwYXNz\r\nProxy-Connection: keep-alive\r\n\r\n";
+        thread=CreateThread(NULL,0,proxy_reply,&sender,0,NULL);CHECK(thread!=NULL);int status;DWORD error;
+        CHECK(ld_tls_http_connect_auth(a,"codex-cloud-backend.chatgpt.com",443,"user","pass",&status,&error)==0);CHECK(status==200);CHECK(error==0);
+        CHECK(WaitForSingleObject(thread,2000)==WAIT_OBJECT_0);CloseHandle(thread);CHECK(sender.matched);char sentinel;CHECK(recv(a,&sentinel,1,0)==1&&sentinel=='Z');closesocket(a);closesocket(b);
+    }
     CHECK(ld_tls_http_connect(INVALID_SOCKET,"chatgpt.com\r\nHost:evil",443,NULL,NULL)==-1);
+    CHECK(ld_tls_http_connect_auth(INVALID_SOCKET,"chatgpt.com",443,"bad\r\nuser","pass",NULL,NULL)==-1);
+    CHECK(ld_tls_http_connect_auth(INVALID_SOCKET,"chatgpt.com",443,"user","bad\npass",NULL,NULL)==-1);
     printf("TLS/domain tunnel checks passed: %d\n",checks);
 }
 /* Driver-free integration fixture. It exercises the production peek/CONNECT

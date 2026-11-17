@@ -6,8 +6,8 @@
 
 1. Download `AgentProxy.exe` (single portable executable) or `AgentProxy-Enhanced-win-x64.zip` and verify the published `.sha256` checksum.
 2. For portable use, run `AgentProxy.exe` directly as a normal user. For fixed machine installation of the enhanced package, run `Install-Enhanced.ps1` in 64-bit Windows PowerShell (installs hash-pinned components under `C:\Program Files\AgentProxyProcessProxy\<bundle-id>`).
-3. In **ChatGPT / Codex (Store)** mode, uncheck **Enable enhanced proxy** for standard `HTTP / Mixed` launching without drivers, or check it for `HTTP` / `SOCKS5` kernel-level TCP 443 redirection.
-4. In **Antigravity (Desktop)** mode, choose `HTTP` or `SOCKS5` and launch without administrator elevation or WinDivert.
+3. In **ChatGPT / Codex (Store)** mode, uncheck **Enable enhanced proxy** for unauthenticated `HTTP / Mixed` launching without drivers, or check it for `HTTP` / `SOCKS5` (with optional username/password auth) kernel-level TCP 443 redirection.
+4. In **Antigravity (Desktop)** mode, choose `HTTP` or `SOCKS5` (with optional username/password auth) and launch without administrator elevation or WinDivert.
 
 ## Actual scope & security boundaries
 

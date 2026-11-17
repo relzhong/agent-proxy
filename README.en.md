@@ -24,11 +24,13 @@
 - **Local & LAN Proxy Support**
   - Supports both loopback (`127.0.0.1`) and non-loopback unicast IPv4 addresses (e.g. `192.168.x.x`).
   - Non-loopback proxy IPs are automatically added to direct bypass rules (`NO_PROXY`, `--proxy-bypass-list`, WinDivert direct rule, and Antigravity routing bypass) to avoid proxy loops.
-- **HTTP & SOCKS5 Protocol Support**
-  - **Antigravity (Desktop)**: Supports both `HTTP` and `SOCKS5` natively (no driver or admin elevation required).
+- **HTTP / SOCKS5 & Optional Authentication**
+  - **Antigravity (Desktop)**: Supports both `HTTP` and `SOCKS5` as well as optional username / password authentication (no driver or admin elevation required).
   - **ChatGPT / Codex (Store)**:
-    - **Standard mode (Enhanced Proxy unchecked)**: Supports `HTTP / Mixed` ports without drivers or UAC elevation. *Note: SOCKS5 is not supported in standard Codex / ChatGPT mode; the UI warns and requires checking Enhanced Proxy or switching to HTTP.*
-    - **Enhanced mode (optional checkbox, WinDivert + ProxyBridge)**: Supports both `HTTP` and `SOCKS5` with TLS SNI hostname forwarding (`chatgpt.com`, `openai.com`, `oaistatic.com`, `oaiusercontent.com`) and live Store update / helper tracking.
+    - **Standard mode (Enhanced Proxy unchecked)**: Supports unauthenticated `HTTP / Mixed` ports without drivers or UAC elevation. *Note: SOCKS5 and username/password authentication are not supported in standard Codex / ChatGPT mode; the UI warns and requires checking Enhanced Proxy.*
+    - **Enhanced mode (optional checkbox, WinDivert + ProxyBridge)**: Supports both `HTTP` and `SOCKS5` plus HTTP Basic / SOCKS5 RFC 1929 authentication (including TLS SNI hostname forwarding for OpenAI domains) and live Store update / helper tracking.
+- **Persistent Settings & Encrypted Credentials**
+  - Remembers last used target app, proxy host, port, protocol, Enhanced Proxy checkbox, UI language, username, and password across restarts (`%LOCALAPPDATA%\AgentProxy\settings.json`, with passwords encrypted via Windows per-user DPAPI and never exposed on command lines or in diagnostics).
 
 ---
 
@@ -38,8 +40,8 @@
 2. Fully quit the target desktop client (ChatGPT / Codex or Antigravity).
 3. Run `AgentProxy.exe`:
    - Select **Target app**: `ChatGPT / Codex (Store)` or `Antigravity (Desktop)`.
-   - Enter **Proxy host** (`127.0.0.1` or LAN IP), **Proxy port**, and **Protocol** (`HTTP` / `SOCKS5`).
-   - For **ChatGPT / Codex**: keep **Enable enhanced proxy** unchecked for driver-free `HTTP` launch, or check it for `SOCKS5` / kernel-level TCP 443 coverage.
+   - Enter **Proxy host** (`127.0.0.1` or LAN IP), **Proxy port**, **Protocol** (`HTTP` / `SOCKS5`), and optional **Username / Password** (all remembered across restarts).
+   - For **ChatGPT / Codex**: keep **Enable enhanced proxy** unchecked for driver-free unauthenticated `HTTP` launch, or check it for `SOCKS5`, authenticated proxies, or kernel-level TCP 443 coverage.
    - For **Antigravity**: pick `HTTP` or `SOCKS5` and click **Apply proxy & launch Antigravity** (no admin prompt required).
 
 See [portable documentation](docs/portable.md) and [process-proxy technical notes](docs/process-proxy.md) for security boundaries and component verification details.
@@ -52,6 +54,7 @@ Prerequisites: Windows 10/11 x64, .NET Framework 4.x (`csc.exe`), Visual Studio 
 
 ```powershell
 # Run automated tests
+.\tests\test-launcher-settings.ps1
 .\tests\test-antigravity-launcher.ps1
 .\tests\test-process-proxy.ps1
 .\tests\test-native-process-proxy.ps1

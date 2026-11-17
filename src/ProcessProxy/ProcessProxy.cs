@@ -19,6 +19,8 @@ namespace AgentProxy.ProcessProxy
         public string ProxyHost { get; set; }
         public int ProxyPort { get; set; }
         public string ProxyType { get; set; }
+        public string ProxyUsername { get; set; }
+        public string ProxyPassword { get; set; }
         public bool Process443Approved { get; set; }
         public bool DriverApproved { get; set; }
 
@@ -51,6 +53,19 @@ namespace AgentProxy.ProcessProxy
                 || ProxyPort < 1 || ProxyPort > 65535)
                 throw new ArgumentException("The upstream must be a literal unicast IPv4 or loopback address and a valid port.");
             NormalizeProxyType(ProxyType);
+            ValidateCredential(ProxyUsername, "Proxy username");
+            ValidateCredential(ProxyPassword, "Proxy password");
+            if (!String.IsNullOrEmpty(ProxyPassword) && String.IsNullOrEmpty(ProxyUsername))
+                throw new ArgumentException("Proxy password requires a proxy username.");
+        }
+
+        internal static void ValidateCredential(string value, string label)
+        {
+            if (String.IsNullOrEmpty(value)) return;
+            if (value.IndexOfAny(new[] { '\0', '\r', '\n' }) >= 0)
+                throw new ArgumentException(label + " cannot contain control line breaks.");
+            if (System.Text.Encoding.UTF8.GetByteCount(value) > 255)
+                throw new ArgumentException(label + " must be at most 255 UTF-8 bytes.");
         }
 
         internal static string NormalizeProxyType(string proxyType)
@@ -222,14 +237,14 @@ namespace AgentProxy.ProcessProxy
                 foreach(Process process in Process.GetProcessesByName(name))
                     using(process) try {
                         string path=process.MainModule.FileName;
-                        var candidate=new ProxyPlan { ExecutablePath=path,ProxyHost=current.ProxyHost,ProxyPort=current.ProxyPort,ProxyType=current.ProxyType,Process443Approved=true,DriverApproved=true };
+                        var candidate=new ProxyPlan { ExecutablePath=path,ProxyHost=current.ProxyHost,ProxyPort=current.ProxyPort,ProxyType=current.ProxyType,ProxyUsername=current.ProxyUsername,ProxyPassword=current.ProxyPassword,Process443Approved=true,DriverApproved=true };
                         candidate.Validate();
                         if(PackageName(path)!=family || PackageVersion(path)<version) continue;
                         executable=path;version=PackageVersion(path);
                     } catch(ArgumentException) {} catch(FormatException) {} catch(System.ComponentModel.Win32Exception) {} catch(InvalidOperationException) {}
             string next=Fingerprint(executable);
             if(next==fingerprint) return cachedPlan;
-            var plan=new ProxyPlan { ExecutablePath=executable,ProxyHost=current.ProxyHost,ProxyPort=current.ProxyPort,ProxyType=current.ProxyType,Process443Approved=true,DriverApproved=true };
+            var plan=new ProxyPlan { ExecutablePath=executable,ProxyHost=current.ProxyHost,ProxyPort=current.ProxyPort,ProxyType=current.ProxyType,ProxyUsername=current.ProxyUsername,ProxyPassword=current.ProxyPassword,Process443Approved=true,DriverApproved=true };
             // Establish registered package identity before reading any copied runtime candidates.
             ProxySecurity.VerifyRegisteredPackage(plan);
             plan.BrowserHelperPaths=BrowserHelperScope.Resolve(executable);
@@ -258,8 +273,8 @@ namespace AgentProxy.ProcessProxy
 
     internal interface IProxyEngine : IDisposable
     {
-        uint AddHttpProxy(string host, ushort port);
-        uint AddSocks5Proxy(string host, ushort port);
+        uint AddHttpProxy(string host, ushort port, string username = null, string password = null);
+        uint AddSocks5Proxy(string host, ushort port, string username = null, string password = null);
         uint AddDirectLoopbackRule(string proxyHost = null);
         uint AddProcess443Rule(string executablePath, uint proxyId);
         void DeleteRule(uint id);
@@ -276,6 +291,8 @@ namespace AgentProxy.ProcessProxy
         private string upstreamHost;
         private int upstreamPort;
         private string upstreamType;
+        private string upstreamUser;
+        private string upstreamPass;
         private string packageFamily;
         private uint proxy;
         private bool engineMayBeRunning;
@@ -292,8 +309,8 @@ namespace AgentProxy.ProcessProxy
             {
                 string type = ProxyPlan.NormalizeProxyType(plan.ProxyType);
                 proxy = type == "socks5"
-                    ? engine.AddSocks5Proxy(plan.ProxyHost, (ushort)plan.ProxyPort)
-                    : engine.AddHttpProxy(plan.ProxyHost, (ushort)plan.ProxyPort);
+                    ? engine.AddSocks5Proxy(plan.ProxyHost, (ushort)plan.ProxyPort, plan.ProxyUsername, plan.ProxyPassword)
+                    : engine.AddHttpProxy(plan.ProxyHost, (ushort)plan.ProxyPort, plan.ProxyUsername, plan.ProxyPassword);
                 if (proxy == 0) throw new InvalidOperationException("Proxy configuration failed.");
                 uint direct = engine.AddDirectLoopbackRule(plan.ProxyHost);
                 if (direct == 0) throw new InvalidOperationException("Loopback protection failed.");
@@ -315,6 +332,8 @@ namespace AgentProxy.ProcessProxy
                 if (!engine.Start()) throw new InvalidOperationException("The packet engine did not become ready.");
                 Ready = true;
                 upstreamHost=plan.ProxyHost;upstreamPort=plan.ProxyPort;upstreamType=type;
+                upstreamUser=plan.ProxyUsername ?? String.Empty;
+                upstreamPass=plan.ProxyPassword ?? String.Empty;
                 packageFamily=PackageProxyMaintenance.PackageName(plan.ExecutablePath);
                 foreach(string path in Paths(plan)) executableRules.Add(path);
             }
@@ -329,7 +348,8 @@ namespace AgentProxy.ProcessProxy
         internal bool ExtendVerifiedScope(ProxyPlan plan)
         {
             plan.Validate();
-            if(!Ready || disposed || plan.ProxyHost!=upstreamHost || plan.ProxyPort!=upstreamPort || ProxyPlan.NormalizeProxyType(plan.ProxyType)!=upstreamType)
+            if(!Ready || disposed || plan.ProxyHost!=upstreamHost || plan.ProxyPort!=upstreamPort || ProxyPlan.NormalizeProxyType(plan.ProxyType)!=upstreamType
+                || (plan.ProxyUsername ?? String.Empty)!=upstreamUser || (plan.ProxyPassword ?? String.Empty)!=upstreamPass)
                 throw new InvalidOperationException("A live scope refresh cannot change its upstream.");
             if(PackageProxyMaintenance.PackageName(plan.ExecutablePath)!=packageFamily)
                 throw new InvalidOperationException("A live scope refresh cannot change package family.");
@@ -461,8 +481,47 @@ namespace AgentProxy.ProcessProxy
         }
         // Resolve OpenAI TLS destinations through the upstream using the original
         // ClientHello name, rather than forwarding a possibly poisoned local IP.
-        public uint AddHttpProxy(string host, ushort port) { return metadataProxy=addProxy(0, host, port, IntPtr.Zero, IntPtr.Zero, 1); }
-        public uint AddSocks5Proxy(string host, ushort port) { return metadataProxy=addProxy(1, host, port, IntPtr.Zero, IntPtr.Zero, 1); }
+        public uint AddHttpProxy(string host, ushort port, string username = null, string password = null)
+        {
+            return AddProxyWithAuth(0, host, port, username, password);
+        }
+        public uint AddSocks5Proxy(string host, ushort port, string username = null, string password = null)
+        {
+            return AddProxyWithAuth(1, host, port, username, password);
+        }
+        private uint AddProxyWithAuth(int type, string host, ushort port, string username, string password)
+        {
+            IntPtr userPtr = IntPtr.Zero, passPtr = IntPtr.Zero;
+            int userLen = 0, passLen = 0;
+            try
+            {
+                userPtr = AllocUtf8(username, out userLen);
+                passPtr = AllocUtf8(password, out passLen);
+                return metadataProxy = addProxy(type, host, port, userPtr, passPtr, 1);
+            }
+            finally
+            {
+                FreeUtf8(userPtr, userLen);
+                FreeUtf8(passPtr, passLen);
+            }
+        }
+        private static IntPtr AllocUtf8(string value, out int byteLen)
+        {
+            if (String.IsNullOrEmpty(value)) { byteLen = 0; return IntPtr.Zero; }
+            byte[] utf8 = System.Text.Encoding.UTF8.GetBytes(value);
+            byteLen = utf8.Length + 1;
+            IntPtr ptr = Marshal.AllocHGlobal(byteLen);
+            Marshal.Copy(utf8, 0, ptr, utf8.Length);
+            Marshal.WriteByte(ptr, utf8.Length, 0);
+            Array.Clear(utf8, 0, utf8.Length);
+            return ptr;
+        }
+        private static void FreeUtf8(IntPtr ptr, int byteLen)
+        {
+            if (ptr == IntPtr.Zero) return;
+            for (int i = 0; i < byteLen; i++) Marshal.WriteByte(ptr, i, 0);
+            Marshal.FreeHGlobal(ptr);
+        }
         public uint AddDirectLoopbackRule(string proxyHost = null) { return metadataDirect=addRule("*", ProxyPlan.BuildDirectHosts(proxyHost), "*", IntPtr.Zero, 2, 1, 0); }
         public uint AddProcess443Rule(string path, uint proxy) { uint rule=addRule(path, "*", "443", IntPtr.Zero, 0, 0, proxy);
             if(rule!=0 && diagnostic!=null && !metadataConfigured) { rootedMetadata=diagnostic.QueueMetadata;configureMetadata(rootedMetadata,path,rule,proxy);diagnostic.RecordRules(metadataProxy,metadataDirect,rule);metadataConfigured=true; } return rule; }

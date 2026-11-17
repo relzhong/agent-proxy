@@ -31,11 +31,12 @@ internal static class PackagedChatGPTLauncher
     {
         Uri proxy;
         if (args.Length < 1 || args.Length > 3 || !Uri.TryCreate(args[0], UriKind.Absolute, out proxy)
-            || (proxy.Scheme != Uri.UriSchemeHttp && !proxy.Scheme.Equals("socks5", StringComparison.OrdinalIgnoreCase))
+            || (proxy.Scheme != Uri.UriSchemeHttp && !proxy.Scheme.Equals("socks5", StringComparison.OrdinalIgnoreCase)
+                && !proxy.Scheme.Equals("direct", StringComparison.OrdinalIgnoreCase))
             || String.IsNullOrEmpty(proxy.Host) || proxy.Port <= 0
             || proxy.AbsolutePath != "/")
         {
-            Console.Error.WriteLine("Usage: PackagedChatGPTLauncher.exe (http|socks5)://host:port [cdp-port [expected-package-executable]]");
+            Console.Error.WriteLine("Usage: PackagedChatGPTLauncher.exe (http|socks5|direct)://host:port [cdp-port [expected-package-executable]]");
             return 2;
         }
 
@@ -113,8 +114,13 @@ internal static class PackagedChatGPTLauncher
         var manager = (IApplicationActivationManager)Activator.CreateInstance(Type.GetTypeFromCLSID(ActivationManagerClsid));
         try
         {
-            string arguments = "--proxy-server=" + proxy + " --proxy-bypass-list=" + BuildBypassList(proxy, ";", true);
-            if (cdpPort > 0) arguments += " --remote-debugging-port=" + cdpPort;
+            Uri uri;
+            bool isDirect = Uri.TryCreate(proxy, UriKind.Absolute, out uri)
+                && uri.Scheme.Equals("direct", StringComparison.OrdinalIgnoreCase);
+            string arguments = isDirect
+                ? String.Empty
+                : "--proxy-server=" + proxy + " --proxy-bypass-list=" + BuildBypassList(proxy, ";", true);
+            if (cdpPort > 0) arguments += (arguments.Length > 0 ? " " : String.Empty) + "--remote-debugging-port=" + cdpPort;
             uint pid;
             manager.ActivateApplication(family + "!App", arguments, 0, out pid);
             return pid;
@@ -203,16 +209,24 @@ internal static class PackagedChatGPTLauncher
     private static void SetProxyEnvironment(string proxy)
     {
         Uri uri;
-        bool isSocks5 = Uri.TryCreate(proxy, UriKind.Absolute, out uri)
-            && uri.Scheme.Equals("socks5", StringComparison.OrdinalIgnoreCase);
+        bool isDirect = Uri.TryCreate(proxy, UriKind.Absolute, out uri)
+            && uri.Scheme.Equals("direct", StringComparison.OrdinalIgnoreCase);
+        bool isSocks5 = uri != null && uri.Scheme.Equals("socks5", StringComparison.OrdinalIgnoreCase);
         using (RegistryKey environment = Registry.CurrentUser.CreateSubKey("Environment"))
         {
-            if (isSocks5)
+            if (isDirect)
+            {
+                // Enhanced mode handles authenticated upstreams via WinDivert without exposing credentials to env/Chromium.
+                foreach (string key in new[] { "HTTP_PROXY", "HTTPS_PROXY", "ALL_PROXY", "WS_PROXY", "WSS_PROXY", "NO_PROXY", "NODE_USE_ENV_PROXY" })
+                    environment.DeleteValue(key, false);
+            }
+            else if (isSocks5)
             {
                 // Node.js NODE_USE_ENV_PROXY rejects socks5:// schemes; rely on WinDivert enhanced proxy for Node/TCP443.
                 foreach (string key in new[] { "HTTP_PROXY", "HTTPS_PROXY", "WS_PROXY", "WSS_PROXY", "NODE_USE_ENV_PROXY" })
                     environment.DeleteValue(key, false);
                 environment.SetValue("ALL_PROXY", "socks5h://" + uri.Host + ":" + uri.Port, RegistryValueKind.String);
+                environment.SetValue("NO_PROXY", BuildBypassList(proxy, ",", false), RegistryValueKind.String);
             }
             else
             {
@@ -222,8 +236,8 @@ internal static class PackagedChatGPTLauncher
                 environment.SetValue("WS_PROXY", proxy, RegistryValueKind.String);
                 environment.SetValue("WSS_PROXY", proxy, RegistryValueKind.String);
                 environment.SetValue("NODE_USE_ENV_PROXY", "1", RegistryValueKind.String);
+                environment.SetValue("NO_PROXY", BuildBypassList(proxy, ",", false), RegistryValueKind.String);
             }
-            environment.SetValue("NO_PROXY", BuildBypassList(proxy, ",", false), RegistryValueKind.String);
             string existing = environment.GetValue(BrowserReadLaunchPolicy.EnvironmentKey, null, RegistryValueOptions.DoNotExpandEnvironmentNames) as string;
             string inherited = Environment.GetEnvironmentVariable(BrowserReadLaunchPolicy.EnvironmentKey);
             environment.SetValue(BrowserReadLaunchPolicy.EnvironmentKey, BrowserReadLaunchPolicy.Merge(existing, inherited), RegistryValueKind.String);

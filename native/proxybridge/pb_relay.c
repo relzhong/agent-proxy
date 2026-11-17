@@ -650,7 +650,7 @@ DWORD WINAPI connection_handler(LPVOID arg)
         char tls_host[254];
         // Per-config: only hand the hostname to the proxy (socks5h) when this config
         // opts in; otherwise send the locally-resolved IP (socks5).
-        if (proxy->send_domain_to_proxy && !proxy->username[0] && dest_port == 443 &&
+        if (proxy->send_domain_to_proxy && dest_port == 443 &&
             ld_tls_peek_server_name(client_sock, tls_host, sizeof(tls_host), 1000) &&
             ld_tls_is_openai_host(tls_host))
         {
@@ -683,11 +683,11 @@ DWORD WINAPI connection_handler(LPVOID arg)
         ld_metadata_http_reset();
         char tls_host[254];
         int rc;
-        if (proxy->send_domain_to_proxy && !proxy->username[0] && dest_port == 443 &&
+        if (proxy->send_domain_to_proxy && dest_port == 443 &&
             ld_tls_peek_server_name(client_sock, tls_host, sizeof(tls_host), 1000) &&
             ld_tls_is_openai_host(tls_host)) {
             int status = 0; DWORD error = 0;
-            rc = ld_tls_http_connect(socks_sock, tls_host, dest_port, &status, &error);
+            rc = ld_tls_http_connect_auth(socks_sock, tls_host, dest_port, proxy->username, proxy->password, &status, &error);
             ld_metadata_http_status(status); ld_metadata_http_failure(error);
         } else {
             rc = is_ipv6 ? http_connect_v6(socks_sock, dest_ip6, dest_port, proxy)

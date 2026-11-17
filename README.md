@@ -24,11 +24,13 @@
 - **支持本机与局域网代理地址**
   - 放宽回环地址限制，支持填写 `127.0.0.1` 或局域网/单播 IPv4（如 `192.168.x.x`）。
   - 非回环上游 IP 会自动加入直连排除规则与 `NO_PROXY` / `bypass-list`，防止代理流量回环。
-- **HTTP 与 SOCKS5 双协议支持**
-  - **Antigravity (Desktop)**：原生支持 `HTTP` 与 `SOCKS5`（无需驱动与管理员权限）。
+- **HTTP / SOCKS5 双协议与账密认证**
+  - **Antigravity (Desktop)**：原生支持 `HTTP` 与 `SOCKS5` 以及可选用户名 / 密码认证（无需驱动与管理员权限）。
   - **ChatGPT / Codex (Store)**：
-    - **普通模式（默认不勾选增强代理）**：支持 `HTTP / Mixed` 端口，无需驱动、无需管理员 UAC 授权。*注意：SOCKS5 不支持普通模式 Codex / ChatGPT，界面会明确提示需勾选增强代理或改用 HTTP。*
-    - **增强模式（可选勾选，WinDivert + ProxyBridge）**：同时支持 `HTTP` 与 `SOCKS5`（含 OpenAI 域名 TLS SNI 主机名透传），自动追踪运行中的 Store 版本更新与延迟生成的 `codex.exe` / `node_repl.exe`。
+    - **普通模式（默认不勾选增强代理）**：仅支持无认证的 `HTTP / Mixed` 端口，无需驱动、无需管理员 UAC 授权。*注意：SOCKS5 与用户名/密码认证均不支持普通模式 Codex / ChatGPT，界面会明确提示需勾选增强代理。*
+    - **增强模式（可选勾选，WinDivert + ProxyBridge）**：同时支持 `HTTP` 与 `SOCKS5` 以及 HTTP Basic / SOCKS5 RFC 1929 用户名密码认证（含 OpenAI 域名 TLS SNI 主机名透传），自动追踪运行中的 Store 版本更新与延迟生成的 `codex.exe` / `node_repl.exe`。
+- **配置记忆与凭据保护**
+  - 启动器自动记住上次的目标应用、代理主机、端口、协议、增强代理开关、语言以及用户名/密码（保存到 `%LOCALAPPDATA%\AgentProxy\settings.json`，其中密码通过 Windows 当前用户 DPAPI 加密存储，命令行与诊断日志不记录明文凭据）。
 
 ---
 
@@ -38,8 +40,8 @@
 2. 完全退出目标客户端（ChatGPT / Codex 或 Antigravity）。
 3. 双击运行 `AgentProxy.exe`：
    - 选择 **启动目标**：`ChatGPT / Codex (Store)` 或 `Antigravity (Desktop)`。
-   - 填写 **代理主机**（本机 `127.0.0.1` 或局域网 IP）、**代理端口** 及 **代理协议**（`HTTP` / `SOCKS5`）。
-   - 若启动 **ChatGPT / Codex** 且仅使用 `HTTP / Mixed` 端口，可直接点击 **启动 ChatGPT / Codex**；若使用纯 `SOCKS5` 或需要驱动级 443 兜底，请勾选 **启用增强代理**。
+   - 填写 **代理主机**（本机 `127.0.0.1` 或局域网 IP）、**代理端口**、**代理协议**（`HTTP` / `SOCKS5`），如有需要可填写可选的 **用户名 / 密码**（重启后自动记住）。
+   - 若启动 **ChatGPT / Codex** 且仅使用无认证 `HTTP / Mixed` 端口，可直接点击 **启动 ChatGPT / Codex**；若使用 `SOCKS5` 或填写了代理用户名/密码，请勾选 **启用增强代理**。
    - 若启动 **Antigravity**，选择 `HTTP` 或 `SOCKS5` 后点击 **部署代理并启动 Antigravity**（不需要管理员权限）。
 
 > 详细安全边界与组件校验机制参见 [免安装说明](docs/portable.md) 与 [增强代理技术文档](docs/process-proxy.md)。
@@ -60,7 +62,7 @@ agent-proxy/
 ├── src/
 │   ├── Antigravity/                   # Antigravity 启动、config.json 与 version.dll 管理
 │   ├── Codex/                         # Store 版 ChatGPT/Codex 激活与 CUA 浏览器维护
-│   ├── Launcher/                      # WinForms 主界面、便携引导与诊断日志
+│   ├── Launcher/                      # WPF 高 DPI 主界面、配置记忆与诊断日志
 │   └── ProcessProxy/                  # WinDivert 进程代理控制、权限校验与 Broker
 ├── tests/                             # C# 与原生 C/C++ 自动化回归测试
 └── build.ps1                          # 本地快速编译独立运行目录 (output/dist)
@@ -75,6 +77,7 @@ agent-proxy/
 ### 1. 运行自动化测试
 
 ```powershell
+.\tests\test-launcher-settings.ps1
 .\tests\test-antigravity-launcher.ps1
 .\tests\test-process-proxy.ps1
 .\tests\test-native-process-proxy.ps1

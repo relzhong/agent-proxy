@@ -19,13 +19,14 @@ $launcherExe = Join-Path $outputDir 'AgentProxyLauncher.exe'
     /win32manifest:"$projectDir\assets\app.manifest" `
     /resource:"$projectDir\assets\app-icon.png,app-icon.png" `
     /out:"$launcherExe" `
-    /reference:System.dll /reference:System.Core.dll /reference:System.Drawing.dll /reference:System.Windows.Forms.dll /reference:System.Web.Extensions.dll `
+    /reference:System.dll /reference:System.Core.dll /reference:System.Drawing.dll /reference:System.Security.dll /reference:System.Windows.Forms.dll /reference:System.Web.Extensions.dll `
     "/reference:$fxDir\System.Xaml.dll" `
     "/reference:$fxDir\WPF\PresentationFramework.dll" `
     "/reference:$fxDir\WPF\PresentationCore.dll" `
     "/reference:$fxDir\WPF\WindowsBase.dll" `
     "$projectDir\src\Launcher\Program.cs" `
     "$projectDir\src\Launcher\LauncherDiagnostics.cs" `
+    "$projectDir\src\Launcher\LauncherSettings.cs" `
     "$projectDir\src\Launcher\PortableRuntime.cs" `
     "$projectDir\src\Antigravity\AntigravityLauncher.cs" `
     "$projectDir\src\Codex\CuaProxyForwardingMaintenance.cs" `

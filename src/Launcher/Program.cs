@@ -35,6 +35,8 @@ namespace AgentProxy
     {
         private readonly ProcessProxy.ProxyController processProxy = new ProcessProxy.ProxyController();
         private readonly LauncherDiagnostics diagnostics;
+        private readonly LauncherSettingsStore settingsStore;
+        private readonly bool persistSettings;
         private CuaProxyForwardingWatch browserForwardingWatch;
         private string lastBrowserForwardingError;
         private readonly DispatcherTimer processProxyHealth = new DispatcherTimer { Interval = TimeSpan.FromSeconds(1) };
@@ -43,6 +45,8 @@ namespace AgentProxy
         private readonly TextBox hostBox = new TextBox { Text = "127.0.0.1" };
         private readonly TextBox portBox = new TextBox { Text = "10808" };
         private readonly ComboBox protocolBox = new ComboBox();
+        private readonly TextBox usernameBox = new TextBox();
+        private readonly PasswordBox passwordBox = new PasswordBox();
         private readonly CheckBox processProxyCheckBox = new CheckBox { IsChecked = false };
         private readonly TextBlock antigravityHintLabel = new TextBlock { TextWrapping = TextWrapping.Wrap };
         private readonly Button launchButton = new Button { Height = 42, IsDefault = true };
@@ -56,6 +60,8 @@ namespace AgentProxy
         private readonly TextBlock hostLabel = new TextBlock();
         private readonly TextBlock portLabel = new TextBlock();
         private readonly TextBlock protocolLabel = new TextBlock();
+        private readonly TextBlock usernameLabel = new TextBlock();
+        private readonly TextBlock passwordLabel = new TextBlock();
         private readonly TextBlock footnote = new TextBlock { TextWrapping = TextWrapping.Wrap };
         private readonly TextBlock statusLabel = new TextBlock { TextWrapping = TextWrapping.Wrap, VerticalAlignment = VerticalAlignment.Center };
         private readonly TextBlock statusMark = new TextBlock { Text = "●", FontSize = 11, VerticalAlignment = VerticalAlignment.Center, Margin = new Thickness(0, 0, 8, 0) };
@@ -69,11 +75,16 @@ namespace AgentProxy
         private bool explicitExit;
         private bool trayNoticeShown;
 
-        public LauncherWindow() : this(new LauncherDiagnostics()) { }
+        public LauncherWindow() : this(new LauncherDiagnostics(), new LauncherSettingsStore(), true) { }
 
         internal LauncherWindow(LauncherDiagnostics trace)
+            : this(trace, new LauncherSettingsStore(Path.Combine(Path.GetTempPath(), "agentproxy-test-settings-" + Guid.NewGuid().ToString("N") + ".json")), false) { }
+
+        internal LauncherWindow(LauncherDiagnostics trace, LauncherSettingsStore store, bool persist)
         {
             diagnostics = trace;
+            settingsStore = store ?? new LauncherSettingsStore();
+            persistSettings = persist;
             Title = "Agent Proxy";
             Width = 548;
             SizeToContent = SizeToContent.Height;
@@ -239,6 +250,34 @@ namespace AgentProxy
             Grid.SetColumn(protocolBox, 4); Grid.SetRow(protocolBox, 1); fieldsGrid.Children.Add(protocolBox);
             cardStack.Children.Add(fieldsGrid);
 
+            var authGrid = new Grid { Margin = new Thickness(0, 0, 0, 14) };
+            authGrid.ColumnDefinitions.Add(new ColumnDefinition { Width = new GridLength(1.0, GridUnitType.Star) });
+            authGrid.ColumnDefinitions.Add(new ColumnDefinition { Width = new GridLength(10) });
+            authGrid.ColumnDefinitions.Add(new ColumnDefinition { Width = new GridLength(1.0, GridUnitType.Star) });
+            authGrid.RowDefinitions.Add(new RowDefinition { Height = GridLength.Auto });
+            authGrid.RowDefinitions.Add(new RowDefinition { Height = GridLength.Auto });
+
+            foreach (var lbl in new[] { usernameLabel, passwordLabel })
+            {
+                lbl.FontSize = 12;
+                lbl.FontWeight = FontWeights.SemiBold;
+                lbl.Foreground = BrushFromRgb(71, 85, 105);
+                lbl.Margin = new Thickness(0, 0, 0, 6);
+            }
+            Grid.SetColumn(usernameLabel, 0); Grid.SetRow(usernameLabel, 0); authGrid.Children.Add(usernameLabel);
+            Grid.SetColumn(passwordLabel, 2); Grid.SetRow(passwordLabel, 0); authGrid.Children.Add(passwordLabel);
+
+            usernameBox.Height = 36;
+            usernameBox.VerticalContentAlignment = VerticalAlignment.Center;
+            usernameBox.TextChanged += delegate { if (!isBusy && processProxy.State == ProcessProxy.ProxyState.Off) ApplyTargetStatus(); };
+            passwordBox.Height = 36;
+            passwordBox.VerticalContentAlignment = VerticalAlignment.Center;
+            passwordBox.PasswordChanged += delegate { if (!isBusy && processProxy.State == ProcessProxy.ProxyState.Off) ApplyTargetStatus(); };
+
+            Grid.SetColumn(usernameBox, 0); Grid.SetRow(usernameBox, 1); authGrid.Children.Add(usernameBox);
+            Grid.SetColumn(passwordBox, 2); Grid.SetRow(passwordBox, 1); authGrid.Children.Add(passwordBox);
+            cardStack.Children.Add(authGrid);
+
             processProxyCheckBox.Margin = new Thickness(0, 0, 0, 14);
             processProxyCheckBox.Foreground = BrushFromRgb(51, 65, 85);
             processProxyCheckBox.FontSize = 12.5;
@@ -330,17 +369,28 @@ namespace AgentProxy
             ApplyLanguage();
             Loaded += async delegate
             {
+                var saved = persistSettings ? settingsStore.Load() : null;
                 var resume = PortableRuntime.Resume;
                 if (resume != null)
                 {
+                    if (saved != null)
+                    {
+                        usernameBox.Text = saved.Username ?? String.Empty;
+                        passwordBox.Password = saved.Password ?? String.Empty;
+                    }
                     targetBox.SelectedIndex = 0;
                     hostBox.Text = resume.Host;
                     portBox.Text = resume.Port.ToString();
                     protocolBox.SelectedIndex = String.Equals(resume.Protocol, "socks5", StringComparison.OrdinalIgnoreCase) ? 1 : 0;
                     processProxyCheckBox.IsChecked = resume.Enhanced;
                     english = resume.English;
-                    ApplyLanguage();
+                    UpdateTargetMode();
                     LaunchButtonClick(this, new RoutedEventArgs());
+                }
+                else if (saved != null)
+                {
+                    ApplySavedSettings(saved);
+                    UpdateTargetMode();
                 }
                 else
                 {
@@ -355,6 +405,35 @@ namespace AgentProxy
                     }
                 }
             };
+        }
+
+        private void ApplySavedSettings(LauncherSettings saved)
+        {
+            if (saved == null) return;
+            targetBox.SelectedIndex = String.Equals(saved.Target, "antigravity", StringComparison.OrdinalIgnoreCase) ? 1 : 0;
+            if (!String.IsNullOrWhiteSpace(saved.Host)) hostBox.Text = saved.Host.Trim();
+            if (!String.IsNullOrWhiteSpace(saved.Port)) portBox.Text = saved.Port.Trim();
+            protocolBox.SelectedIndex = String.Equals(saved.Protocol, "socks5", StringComparison.OrdinalIgnoreCase) ? 1 : 0;
+            processProxyCheckBox.IsChecked = saved.Enhanced;
+            english = saved.English;
+            usernameBox.Text = saved.Username ?? String.Empty;
+            passwordBox.Password = saved.Password ?? String.Empty;
+        }
+
+        private void SaveCurrentSettings()
+        {
+            if (!persistSettings) return;
+            settingsStore.Save(new LauncherSettings
+            {
+                Target = IsAntigravitySelected ? "antigravity" : "codex",
+                Host = hostBox.Text.Trim(),
+                Port = portBox.Text.Trim(),
+                Protocol = SelectedProtocol,
+                Enhanced = processProxyCheckBox.IsChecked == true,
+                English = english,
+                Username = usernameBox.Text,
+                Password = passwordBox.Password
+            });
         }
 
         internal void MarkSystemShutdown()
@@ -381,6 +460,7 @@ namespace AgentProxy
                 base.OnClosing(e);
                 return;
             }
+            SaveCurrentSettings();
             processProxyHealth.Stop();
             if (browserForwardingWatch != null) browserForwardingWatch.Dispose();
             try { processProxy.Dispose(); }
@@ -417,6 +497,7 @@ namespace AgentProxy
 
         private bool IsAntigravitySelected { get { return targetBox.SelectedIndex == 1; } }
         private string SelectedProtocol { get { return protocolBox.SelectedIndex == 1 ? "socks5" : "http"; } }
+        private bool HasCredentials { get { return !String.IsNullOrEmpty(usernameBox.Text) || !String.IsNullOrEmpty(passwordBox.Password); } }
         private string L(string chinese, string englishText) { return english ? englishText : chinese; }
 
         private void UpdateTargetMode()
@@ -442,8 +523,14 @@ namespace AgentProxy
         {
             if (IsAntigravitySelected)
             {
-                SetStatus(L("准备就绪 · Antigravity 进程级代理（支持 HTTP / SOCKS5）",
-                    "Ready · Antigravity process proxy (HTTP / SOCKS5)"), null);
+                SetStatus(L("准备就绪 · Antigravity 进程级代理（支持 HTTP / SOCKS5 与账密认证）",
+                    "Ready · Antigravity process proxy (HTTP / SOCKS5 + auth)"), null);
+                return;
+            }
+            if (HasCredentials && processProxyCheckBox.IsChecked != true)
+            {
+                SetStatus(L("注意：带用户名/密码的代理不支持普通模式 Codex / ChatGPT，请勾选「启用增强代理」或清空凭据",
+                    "Note: Authenticated proxies are not supported in standard Codex / ChatGPT mode; enable Enhanced Proxy or clear credentials"), false);
                 return;
             }
             if (SelectedProtocol == "socks5" && processProxyCheckBox.IsChecked != true)
@@ -459,7 +546,7 @@ namespace AgentProxy
                     : L("准备就绪 · 已勾选增强代理（HTTP 驱动级 443 转发，需驱动授权）", "Ready · Enhanced proxy selected (HTTP driver 443 routing, approval required)"), null);
                 return;
             }
-            SetStatus(L("准备就绪 · 普通代理模式（无需驱动，仅支持 HTTP）", "Ready · Standard proxy mode (no driver needed, HTTP only)"), null);
+            SetStatus(L("准备就绪 · 普通代理模式（无需驱动，仅支持无认证 HTTP）", "Ready · Standard proxy mode (no driver needed, unauthenticated HTTP only)"), null);
         }
 
         private void ApplyLanguage()
@@ -472,8 +559,10 @@ namespace AgentProxy
             hostLabel.Text = L("代理主机（本机 / 局域网 IP）", "Proxy host (local / LAN IP)");
             portLabel.Text = L("代理端口", "Proxy port");
             protocolLabel.Text = L("代理协议", "Protocol");
-            processProxyCheckBox.Content = (!IsAntigravitySelected && SelectedProtocol == "socks5")
-                ? L("启用增强代理（SOCKS5 不支持普通 Codex，必须勾选）", "Enable enhanced proxy (required for SOCKS5 on Codex)")
+            usernameLabel.Text = L("用户名（可选）", "Username (optional)");
+            passwordLabel.Text = L("密码（可选）", "Password (optional)");
+            processProxyCheckBox.Content = (!IsAntigravitySelected && (SelectedProtocol == "socks5" || HasCredentials))
+                ? L("启用增强代理（SOCKS5 或账密认证不支持普通 Codex，必须勾选）", "Enable enhanced proxy (required for SOCKS5 / auth on Codex)")
                 : L("启用增强代理（WinDivert 驱动级 443 转发，可选）", "Enable enhanced proxy (WinDivert 443 routing, optional)");
             antigravityHintLabel.Text = L(
                 "通过 version.dll 注入主进程与子进程，无需驱动与管理员权限",
@@ -482,10 +571,10 @@ namespace AgentProxy
                 ? L("部署代理并启动 Antigravity", "Apply proxy & launch Antigravity")
                 : L("启动 ChatGPT / Codex", "Launch ChatGPT / Codex");
             footnote.Text = IsAntigravitySelected
-                ? L("每次启动自动校验并恢复 version.dll，并将主机/端口/协议写入 config.json（自动静默与排除上游 IP）。",
-                    "Verifies/restores version.dll on launch and writes host/port/protocol to config.json (silent load, auto-bypasses upstream IP).")
-                : L("普通模式仅支持 HTTP/Mixed；SOCKS5 不支持普通 Codex，需勾选增强代理。勾选增强代理时非回环 IP 自动直连排除，关闭窗口收至托盘。",
-                    "Standard mode supports HTTP/Mixed only; SOCKS5 requires Enhanced Proxy. Enhanced mode auto-excludes non-loopback IPs and stays in the tray.");
+                ? L("配置自动保存；每次启动校验并恢复 version.dll，并将主机/端口/协议/凭据写入 config.json（密码本地加密保存）。",
+                    "Settings are saved automatically (password encrypted locally); verifies version.dll and writes host/port/protocol/auth to config.json.")
+                : L("普通模式仅支持无认证 HTTP；SOCKS5 或用户名/密码认证需勾选增强代理。配置自动保存，密码使用当前用户 DPAPI 加密存储。",
+                    "Standard mode supports unauthenticated HTTP only; SOCKS5 or auth requires Enhanced Proxy. Settings save automatically with DPAPI encryption.");
             browserProxyButton.Content = L("检查 / 修复浏览器", "Check / repair browser");
             removePatchButton.Content = L("移除 Antigravity 代理补丁 (version.dll)", "Remove Antigravity proxy patch (version.dll)");
             ApplyTargetStatus();
@@ -525,6 +614,8 @@ namespace AgentProxy
             hostBox.IsEnabled = enabled;
             portBox.IsEnabled = enabled;
             protocolBox.IsEnabled = enabled;
+            usernameBox.IsEnabled = enabled;
+            passwordBox.IsEnabled = enabled;
         }
 
         private async void LaunchButtonClick(object sender, RoutedEventArgs e)
@@ -543,12 +634,23 @@ namespace AgentProxy
                     bool isAntigravity = IsAntigravitySelected;
                     string protocol = SelectedProtocol;
                     bool enhanced = processProxyCheckBox.IsChecked == true;
+                    string username = usernameBox.Text;
+                    string password = passwordBox.Password;
+                    bool hasAuth = !String.IsNullOrEmpty(username);
 
                     diagnostics.Stage("checking-proxy");
                     if (host.Length == 0) throw new Exception(L("请输入代理主机。", "Enter a proxy host."));
+                    if (!String.IsNullOrEmpty(password) && String.IsNullOrEmpty(username))
+                        throw new Exception(L("填写代理密码时必须同时填写用户名。", "A proxy username is required when a password is provided."));
+                    ProcessProxy.ProxyPlan.ValidateCredential(username, "Proxy username");
+                    ProcessProxy.ProxyPlan.ValidateCredential(password, "Proxy password");
+                    if (!isAntigravity && hasAuth && !enhanced)
+                        throw new Exception(L("带用户名/密码的代理不支持普通模式 Codex / ChatGPT，请勾选「启用增强代理」或清空凭据。",
+                            "Authenticated proxies are not supported in standard Codex / ChatGPT mode. Enable Enhanced Proxy or clear the credentials."));
                     if (!isAntigravity && protocol == "socks5" && !enhanced)
                         throw new Exception(L("SOCKS5 不支持普通模式 Codex / ChatGPT，请勾选「启用增强代理」或改用 HTTP。",
                             "SOCKS5 is not supported in standard Codex / ChatGPT mode. Enable Enhanced Proxy or switch to HTTP."));
+                    SaveCurrentSettings();
                     SetStatus(L("正在检查代理…", "Checking proxy…"), null);
 
                     bool reachable = await Task.Run(() => CanConnect(host, port));
@@ -561,17 +663,19 @@ namespace AgentProxy
                         if (await Task.Run(() => AntigravityLauncher.IsRunning(agExe)))
                             throw new Exception(L("Antigravity 已在运行，请完全退出后再试。", "Antigravity is already running. Fully quit it and try again."));
                         SetStatus(L("正在写入配置并校验 version.dll…", "Writing config and verifying version.dll…"), null);
-                        await Task.Run(() => AntigravityLauncher.DeployAndWriteConfig(agExe, host, port, protocol));
+                        await Task.Run(() => AntigravityLauncher.DeployAndWriteConfig(agExe, host, port, protocol, null, username, password));
                         await Task.Run(() => AntigravityLauncher.Launch(agExe));
                         diagnostics.Stage("running");
-                        SetStatus(String.Format(L("已通过 {0}://{1}:{2} 启动 Antigravity", "Antigravity started via {0}://{1}:{2}"), protocol, host, port), true);
+                        SetStatus(String.Format(L("已通过 {0}://{1}:{2}{3} 启动 Antigravity", "Antigravity started via {0}://{1}:{2}{3}"),
+                            protocol, host, port, hasAuth ? L("（已认证）", " (authenticated)") : String.Empty), true);
                         return;
                     }
 
                     if (await Task.Run(() => IsDesktopAppRunning()))
                         throw new Exception(L("ChatGPT 已在运行，请完全退出后再试。", "ChatGPT is already running. Fully quit it and try again."));
 
-                    string proxyUrl = String.Format("{0}://{1}:{2}", protocol, host, port);
+                    string proxyDisplay = String.Format("{0}://{1}:{2}", protocol, host, port);
+                    string clientProxyArg = hasAuth ? String.Format("direct://{0}:{1}", host, port) : proxyDisplay;
                     if (enhanced)
                     {
                         SetStatus(L("正在准备增强代理组件…", "Preparing enhanced proxy components…"), null);
@@ -597,6 +701,8 @@ namespace AgentProxy
                                 ProxyHost = host,
                                 ProxyPort = port,
                                 ProxyType = protocol,
+                                ProxyUsername = username,
+                                ProxyPassword = password,
                                 Process443Approved = true,
                                 DriverApproved = true
                             });
@@ -608,9 +714,10 @@ namespace AgentProxy
                     if (browserForwardingWatch == null) browserForwardingWatch = await Task.Run(() => CuaProxyForwardingWatch.CreateDefault());
                     SetStatus(L("正在查找 ChatGPT…", "Finding ChatGPT…"), null);
                     diagnostics.Stage("activating-package");
-                    await StartPackagedChatGPT(proxyUrl, null, processProxy.State == ProcessProxy.ProxyState.Ready ? processProxy.TargetExecutable : null);
+                    await StartPackagedChatGPT(clientProxyArg, null, processProxy.State == ProcessProxy.ProxyState.Ready ? processProxy.TargetExecutable : null);
                     diagnostics.Stage("running");
-                    SetStatus(L("已通过 " + proxyUrl + " 启动 ChatGPT", "ChatGPT started through " + proxyUrl), true);
+                    SetStatus(L("已通过 " + proxyDisplay + (hasAuth ? "（已认证）" : String.Empty) + " 启动 ChatGPT",
+                        "ChatGPT started through " + proxyDisplay + (hasAuth ? " (authenticated)" : String.Empty)), true);
                 }
                 catch (Exception error) { launchFailure = error; }
                 if (launchFailure != null)
@@ -783,27 +890,8 @@ namespace AgentProxy
             btnStyle.Setters.Add(new Setter(Control.TemplateProperty, btnTemplate));
             Resources.Add(typeof(Button), btnStyle);
 
-            // Clean rounded TextBox template
-            var tbTemplate = new ControlTemplate(typeof(TextBox));
-            var tbBorder = new FrameworkElementFactory(typeof(Border));
-            tbBorder.Name = "bd";
-            tbBorder.SetValue(Border.BackgroundProperty, Brushes.White);
-            tbBorder.SetValue(Border.BorderBrushProperty, BrushFromRgb(203, 213, 225));
-            tbBorder.SetValue(Border.BorderThicknessProperty, new Thickness(1));
-            tbBorder.SetValue(Border.CornerRadiusProperty, new CornerRadius(7));
-            tbBorder.SetValue(Border.PaddingProperty, new Thickness(8, 0, 8, 0));
-            var tbHost = new FrameworkElementFactory(typeof(ScrollViewer));
-            tbHost.Name = "PART_ContentHost";
-            tbHost.SetValue(FrameworkElement.VerticalAlignmentProperty, VerticalAlignment.Center);
-            tbBorder.AppendChild(tbHost);
-            tbTemplate.VisualTree = tbBorder;
-            var tbFocus = new Trigger { Property = UIElement.IsKeyboardFocusedProperty, Value = true };
-            tbFocus.Setters.Add(new Setter(Border.BorderBrushProperty, BrushFromRgb(2, 132, 199), "bd"));
-            tbTemplate.Triggers.Add(tbFocus);
-            var tbStyle = new Style(typeof(TextBox));
-            tbStyle.Setters.Add(new Setter(Control.TemplateProperty, tbTemplate));
-            tbStyle.Setters.Add(new Setter(Control.ForegroundProperty, BrushFromRgb(15, 23, 42)));
-            Resources.Add(typeof(TextBox), tbStyle);
+            Resources.Add(typeof(TextBox), CreateInputStyle(typeof(TextBox)));
+            Resources.Add(typeof(PasswordBox), CreateInputStyle(typeof(PasswordBox)));
 
             // Clean rounded ComboBox template via XAML
             const string comboTemplateXaml =
@@ -838,6 +926,30 @@ namespace AgentProxy
             cbItemStyle.Setters.Add(new Setter(Control.PaddingProperty, new Thickness(10, 7, 10, 7)));
             cbItemStyle.Setters.Add(new Setter(Control.ForegroundProperty, BrushFromRgb(15, 23, 42)));
             Resources.Add(typeof(ComboBoxItem), cbItemStyle);
+        }
+
+        private Style CreateInputStyle(Type controlType)
+        {
+            var template = new ControlTemplate(controlType);
+            var border = new FrameworkElementFactory(typeof(Border));
+            border.Name = "bd";
+            border.SetValue(Border.BackgroundProperty, Brushes.White);
+            border.SetValue(Border.BorderBrushProperty, BrushFromRgb(203, 213, 225));
+            border.SetValue(Border.BorderThicknessProperty, new Thickness(1));
+            border.SetValue(Border.CornerRadiusProperty, new CornerRadius(7));
+            border.SetValue(Border.PaddingProperty, new Thickness(8, 0, 8, 0));
+            var host = new FrameworkElementFactory(typeof(ScrollViewer));
+            host.Name = "PART_ContentHost";
+            host.SetValue(FrameworkElement.VerticalAlignmentProperty, VerticalAlignment.Center);
+            border.AppendChild(host);
+            template.VisualTree = border;
+            var focusTrigger = new Trigger { Property = UIElement.IsKeyboardFocusedProperty, Value = true };
+            focusTrigger.Setters.Add(new Setter(Border.BorderBrushProperty, BrushFromRgb(2, 132, 199), "bd"));
+            template.Triggers.Add(focusTrigger);
+            var style = new Style(controlType);
+            style.Setters.Add(new Setter(Control.TemplateProperty, template));
+            style.Setters.Add(new Setter(Control.ForegroundProperty, BrushFromRgb(15, 23, 42)));
+            return style;
         }
     }
 }

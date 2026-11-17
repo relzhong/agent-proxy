@@ -21,8 +21,8 @@ class Tests
     class Engine:IProxyEngine
     {
         public List<string> Calls=new List<string>(); public bool FailStart,FailStop,FailRule,FailHelperRule,FailCoreRule,HangStart;
-        public uint AddHttpProxy(string host,ushort port) { Calls.Add("proxy:"+host+":"+port); return 1; }
-        public uint AddSocks5Proxy(string host,ushort port) { Calls.Add("socks5:"+host+":"+port); return 1; }
+        public uint AddHttpProxy(string host,ushort port,string username=null,string password=null) { Calls.Add("proxy:"+host+":"+port+(String.IsNullOrEmpty(username)?"":":"+username+":"+password)); return 1; }
+        public uint AddSocks5Proxy(string host,ushort port,string username=null,string password=null) { Calls.Add("socks5:"+host+":"+port+(String.IsNullOrEmpty(username)?"":":"+username+":"+password)); return 1; }
         public uint AddDirectLoopbackRule(string proxyHost = null) { Calls.Add(proxyHost==null||ProxyPlan.IsLoopback(IPAddress.Parse(proxyHost))?"loopback":"loopback+"+proxyHost); return 2; }
         public uint AddProcess443Rule(string path,uint id) { Calls.Add("target:"+path); return FailRule || (FailHelperRule && path.EndsWith("node_repl.exe")) || (FailCoreRule && path.StartsWith(CoreHelperScope.RuntimeRoot,StringComparison.OrdinalIgnoreCase))?0u:3u; }
         public void DeleteRule(uint id) { Calls.Add("delete"+id); }
@@ -263,6 +263,12 @@ class Tests
             cancelledPipe.Dispose();bool ended=cancelledChild.WaitForExit(3000);string result=ended?cancelledChild.StandardError.ReadToEnd():"pending";
             Check(ended && cancelledChild.ExitCode==0 && result.Contains("ENGINE_CALLS=0"),"actual approval pipe loss exits cleanly without constructing an engine");
         }
+        plan=Plan();plan.ProxyUsername="u1";plan.ProxyPassword="p1";plan.Validate();
+        plan=Plan();plan.ProxyUsername="";plan.ProxyPassword="p1";Reject(()=>plan.Validate(),"password without username rejected");
+        plan=Plan();plan.ProxyUsername=new string('a',256);plan.ProxyPassword="p1";Reject(()=>plan.Validate(),"oversized UTF-8 username rejected");
+        plan=Plan();plan.ProxyUsername="bad\r\nuser";plan.ProxyPassword="p1";Reject(()=>plan.Validate(),"CRLF username rejected");
+        engine=new Engine();using(var authSession=new ProxySession(engine)){var authPlan=Plan();authPlan.ProxyType="socks5";authPlan.ProxyUsername="alice";authPlan.ProxyPassword="secret";authSession.Start(authPlan);Check(engine.Calls.Contains("socks5:127.0.0.1:10808:alice:secret"),"session forwards credentials to engine");}
+        rows.Clear();var authPlanForDiag=Plan();authPlanForDiag.ProxyUsername="never-log-user";authPlanForDiag.ProxyPassword="never-log-pass";diag.RecordPlan(authPlanForDiag);Check(!rows.Exists(r=>r.Contains("never-log-user")||r.Contains("never-log-pass")),"diagnostic omits proxy credentials");
         Console.WriteLine("PASS "+count+" assertions; simulated engines and owned test processes only, no native loading, elevation or traffic forwarding.");return 0;
     }
 }

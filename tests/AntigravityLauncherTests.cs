@@ -30,7 +30,7 @@ internal static class AntigravityLauncherTests
         Check(AntigravityLauncher.NormalizeProtocol("SOCKS5") == "socks5", "socks5 normalized");
         Reject(() => AntigravityLauncher.NormalizeProtocol("ftp"), "unsupported protocol rejected");
 
-        AntigravityLauncher.ValidateEndpoint("127.0.0.1", 7890, "socks5");
+        AntigravityLauncher.ValidateEndpoint("127.0.0.1", 7890, "socks5", "alice", "s3cr3t");
         AntigravityLauncher.ValidateEndpoint("192.168.1.50", 10808, "http");
         AntigravityLauncher.ValidateEndpoint("localhost", 1080, "http");
         AntigravityLauncher.ValidateEndpoint("::1", 1080, "socks5");
@@ -38,12 +38,15 @@ internal static class AntigravityLauncherTests
         Reject(() => AntigravityLauncher.ValidateEndpoint("127.0.0.1:7890", 7890, "http"), "host with port rejected");
         Reject(() => AntigravityLauncher.ValidateEndpoint("127.0.0.1", 0, "http"), "port 0 rejected");
         Reject(() => AntigravityLauncher.ValidateEndpoint("127.0.0.1", 70000, "http"), "port > 65535 rejected");
+        Reject(() => AntigravityLauncher.ValidateEndpoint("127.0.0.1", 7890, "http", "", "onlypass"), "password without username rejected");
+        Reject(() => AntigravityLauncher.ValidateEndpoint("127.0.0.1", 7890, "http", "bad\nuser", "pass"), "newline in username rejected");
 
         var serializer = new JavaScriptSerializer();
-        string freshJson = AntigravityLauncher.BuildConfigJson(null, "192.168.1.50", 7897, "socks5");
+        string freshJson = AntigravityLauncher.BuildConfigJson(null, "192.168.1.50", 7897, "socks5", "alice", "s3cr3t");
         var fresh = serializer.Deserialize<Dictionary<string, object>>(freshJson);
         var proxy = (Dictionary<string, object>)fresh["proxy"];
-        Check((string)proxy["host"] == "192.168.1.50" && (int)proxy["port"] == 7897 && (string)proxy["type"] == "socks5", "fresh proxy config");
+        Check((string)proxy["host"] == "192.168.1.50" && (int)proxy["port"] == 7897 && (string)proxy["type"] == "socks5"
+            && (string)proxy["username"] == "alice" && (string)proxy["password"] == "s3cr3t", "fresh proxy config with auth");
         var ui = (Dictionary<string, object>)fresh["ui"];
         Check((string)ui["load_notify"] == "none", "silent load notify");
         var updates = (Dictionary<string, object>)fresh["updates"];
@@ -61,7 +64,8 @@ internal static class AntigravityLauncherTests
         string updatedJson = AntigravityLauncher.BuildConfigJson(existingWithCustom, "127.0.0.1", 10808, "http");
         var updated = serializer.Deserialize<Dictionary<string, object>>(updatedJson);
         var updatedProxy = (Dictionary<string, object>)updated["proxy"];
-        Check((string)updatedProxy["host"] == "127.0.0.1" && (int)updatedProxy["port"] == 10808 && (string)updatedProxy["type"] == "http", "updated proxy config");
+        Check((string)updatedProxy["host"] == "127.0.0.1" && (int)updatedProxy["port"] == 10808 && (string)updatedProxy["type"] == "http"
+            && (string)updatedProxy["username"] == "" && (string)updatedProxy["password"] == "", "updated proxy config clears auth");
         var updatedRuleItems = ((ArrayList)((Dictionary<string, object>)((Dictionary<string, object>)updated["proxy_rules"])["routing"])["rules"]).Cast<Dictionary<string, object>>().ToArray();
         Check(updatedRuleItems.Length == 1 && (string)updatedRuleItems[0]["name"] == "custom-rule", "stale upstream rule removed while custom rule preserved");
 
