@@ -9,14 +9,21 @@ New-Item -ItemType Directory -Path $outputDir -Force | Out-Null
 if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
 
 $windowsDir = Split-Path -Parent ([Environment]::SystemDirectory)
-$csc = "$windowsDir\Microsoft.NET\Framework64\v4.0.30319\csc.exe"
+$fxDir = "$windowsDir\Microsoft.NET\Framework64\v4.0.30319"
+$csc = "$fxDir\csc.exe"
 $launcherExe = Join-Path $outputDir 'AgentProxyLauncher.exe'
 
 & $csc `
     /nologo /target:winexe /platform:x64 /optimize+ `
     /win32icon:"$projectDir\assets\app-icon.ico" `
+    /win32manifest:"$projectDir\assets\app.manifest" `
+    /resource:"$projectDir\assets\app-icon.png,app-icon.png" `
     /out:"$launcherExe" `
     /reference:System.dll /reference:System.Core.dll /reference:System.Drawing.dll /reference:System.Windows.Forms.dll /reference:System.Web.Extensions.dll `
+    "/reference:$fxDir\System.Xaml.dll" `
+    "/reference:$fxDir\WPF\PresentationFramework.dll" `
+    "/reference:$fxDir\WPF\PresentationCore.dll" `
+    "/reference:$fxDir\WPF\WindowsBase.dll" `
     "$projectDir\src\Launcher\Program.cs" `
     "$projectDir\src\Launcher\LauncherDiagnostics.cs" `
     "$projectDir\src\Launcher\PortableRuntime.cs" `
@@ -40,6 +47,7 @@ $trustedClientSource = Join-Path ([IO.Path]::GetTempPath()) ('agentproxy-trusted
 ('namespace AgentProxy.ProcessProxy { internal static class TrustedClient { public const string Sha256="' + $trustedClientHash + '"; } }') | Set-Content -LiteralPath $trustedClientSource -Encoding UTF8
 try {
     & $csc /nologo /target:winexe /platform:x64 /optimize+ /reference:System.Web.Extensions.dll /reference:System.Windows.Forms.dll `
+        "/win32manifest:$projectDir\assets\app.manifest" `
         "/out:$outputDir\ProcessProxyHost.exe" `
         "$projectDir\src\ProcessProxy\ProcessProxy.cs" `
         "$projectDir\src\ProcessProxy\ProcessProxyHost.cs" `

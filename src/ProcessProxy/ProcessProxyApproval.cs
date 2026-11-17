@@ -20,7 +20,7 @@ namespace AgentProxy.ProcessProxy
         {
             var clock=Stopwatch.StartNew();
             var lifetime=new ApprovalLifetime(()=> { uint read,available,left; return PeekNamedPipe(pipe.SafePipeHandle,IntPtr.Zero,0,out read,out available,out left); },()=>clock.ElapsedMilliseconds,120000);
-            using(var form=new Form { Text="Launch Deck driver and traffic approval",Width=620,Height=330,StartPosition=FormStartPosition.CenterScreen,MaximizeBox=false,MinimizeBox=false })
+            using(var form=new Form { Text="Agent Proxy driver and traffic approval",Width=640,Height=340,StartPosition=FormStartPosition.CenterScreen,MaximizeBox=false,MinimizeBox=false,AutoScaleMode=AutoScaleMode.Dpi,Font=new System.Drawing.Font("Microsoft YaHei UI",9.5F),BackColor=System.Drawing.Color.FromArgb(243,248,252) })
             using(var timer=new Timer { Interval=100 })
             {
                 var description=new Label { Left=20,Top=20,Width=565,Height=210,Text="Enable enhanced proxy?\n\n"+plan.ExecutablePath+"\nVerified browser helpers: "+(plan.BrowserHelperPaths??new string[0]).Length+"; Codex core helpers: "+(plan.CoreHelperPaths??new string[0]).Length+"\n\nRoute these executables' remote TCP 443 through "+ProxyPlan.NormalizeProxyType(plan.ProxyType)+"://"+plan.ProxyHost+":"+plan.ProxyPort+". Follow running updates in this package family after registration and helper-hash checks. Other applications stay direct. No UDP/DNS capture, TLS interception, system proxy or TUN changes.\n\nApproval cancels if Launch Deck disconnects or after two minutes." };

@@ -47,7 +47,7 @@ $exe=Join-Path $OutputDirectory 'AgentProxy.exe'
 $common=@('/nologo','/platform:x64','/optimize+','/reference:System.Web.Extensions.dll','/reference:System.Windows.Forms.dll','/reference:System.IO.Compression.dll','/reference:System.IO.Compression.FileSystem.dll',
  "/resource:$zipPath,payload.zip","/resource:$embeddedManifest,manifest.json",
  "$repo\src\Launcher\PortableBootstrap.cs","$repo\src\ProcessProxy\ProcessProxy.cs","$repo\src\ProcessProxy\ProcessProxySecurity.cs","$repo\src\ProcessProxy\ProcessProxyDiagnostic.cs",$generated)
-& $compiler /target:winexe "/win32icon:$repo\assets\app-icon.ico" "/out:$exe" @common
+& $compiler /target:winexe "/win32icon:$repo\assets\app-icon.ico" "/win32manifest:$repo\assets\app.manifest" "/out:$exe" @common
 if($LASTEXITCODE -ne 0){throw 'Portable bootstrap compilation failed.'}
 $tests=Join-Path $OutputDirectory 'PortableTests.exe'
 & $compiler /target:exe /main:PortableTests "/out:$tests" @common "$repo\tests\PortableTests.cs"
