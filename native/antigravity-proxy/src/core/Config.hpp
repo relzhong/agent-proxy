@@ -22,6 +22,7 @@ namespace Core {
         std::string type = "socks5";
         std::string username;
         std::string password;
+        bool tls_insecure = false;
     };
 
     struct FakeIPConfig {
@@ -766,6 +767,7 @@ namespace Core {
                     else if (p.contains("user")) proxy.username = p.value("user", "");
                     if (p.contains("password")) proxy.password = p.value("password", "");
                     else if (p.contains("pass")) proxy.password = p.value("pass", "");
+                    proxy.tls_insecure = p.value("tls_insecure", false);
                 }
 
                 // 配置校验：统一 proxy.type 大小写，并对关键字段做防御性修正，避免运行期异常
@@ -785,15 +787,8 @@ namespace Core {
                 std::transform(proxy.type.begin(), proxy.type.end(), proxy.type.begin(),
                                [](unsigned char c) { return (char)std::tolower(c); });
                 if (proxy.type.empty()) proxy.type = "socks5";
-
-                // 兼容用户常见写法：不少人会把 “HTTP 代理(用于 HTTPS 网站的 CONNECT)” 误写成 https。
-                // 注意：这里的 https 仅按 HTTP CONNECT 处理，不代表支持“与代理之间使用 TLS 的 HTTPS 代理”。
-                if (proxy.type == "https") {
-                    Logger::Warn("配置: proxy.type=https 暂不支持 TLS 代理；若你指的是 HTTP 代理(含 CONNECT) 访问 HTTPS 站点，请改为 http。当前已按 http 处理。");
-                    proxy.type = "http";
-                }
-                if (proxy.type != "socks5" && proxy.type != "http") {
-                    Logger::Warn("配置: proxy.type 无效(" + proxy.type + ")，已回退为 socks5 (可选: socks5/http)");
+                if (proxy.type != "socks5" && proxy.type != "http" && proxy.type != "https") {
+                    Logger::Warn("配置: proxy.type 无效(" + proxy.type + ")，已回退为 socks5 (可选: socks5/http/https)");
                     proxy.type = "socks5";
                 }
                 if (proxy.host.empty()) {

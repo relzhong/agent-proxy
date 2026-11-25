@@ -26,7 +26,8 @@ internal static class AntigravityLauncherTests
     {
         Check(AntigravityLauncher.NormalizeProtocol("http") == "http", "http normalized");
         Check(AntigravityLauncher.NormalizeProtocol("HTTP") == "http", "HTTP normalized");
-        Check(AntigravityLauncher.NormalizeProtocol("https") == "http", "https normalized");
+        Check(AntigravityLauncher.NormalizeProtocol("https") == "https", "https normalized");
+        Check(AntigravityLauncher.NormalizeProtocol("HTTPS") == "https", "HTTPS normalized");
         Check(AntigravityLauncher.NormalizeProtocol("SOCKS5") == "socks5", "socks5 normalized");
         Reject(() => AntigravityLauncher.NormalizeProtocol("ftp"), "unsupported protocol rejected");
 
@@ -65,9 +66,19 @@ internal static class AntigravityLauncherTests
         var updated = serializer.Deserialize<Dictionary<string, object>>(updatedJson);
         var updatedProxy = (Dictionary<string, object>)updated["proxy"];
         Check((string)updatedProxy["host"] == "127.0.0.1" && (int)updatedProxy["port"] == 10808 && (string)updatedProxy["type"] == "http"
-            && (string)updatedProxy["username"] == "" && (string)updatedProxy["password"] == "", "updated proxy config clears auth");
+            && (string)updatedProxy["username"] == "" && (string)updatedProxy["password"] == "" && (bool)updatedProxy["tls_insecure"] == false, "updated proxy config clears auth");
         var updatedRuleItems = ((ArrayList)((Dictionary<string, object>)((Dictionary<string, object>)updated["proxy_rules"])["routing"])["rules"]).Cast<Dictionary<string, object>>().ToArray();
         Check(updatedRuleItems.Length == 1 && (string)updatedRuleItems[0]["name"] == "custom-rule", "stale upstream rule removed while custom rule preserved");
+
+        // HTTPS proxy with domain host and self-signed TLS trust flag
+        string httpsJson = AntigravityLauncher.BuildConfigJson(null, "proxy.example.com", 443, "https", "bob", "pw", true);
+        var httpsCfg = serializer.Deserialize<Dictionary<string, object>>(httpsJson);
+        var httpsProxy = (Dictionary<string, object>)httpsCfg["proxy"];
+        Check((string)httpsProxy["host"] == "proxy.example.com" && (int)httpsProxy["port"] == 443 && (string)httpsProxy["type"] == "https"
+            && (string)httpsProxy["username"] == "bob" && (string)httpsProxy["password"] == "pw" && (bool)httpsProxy["tls_insecure"] == true, "https proxy with insecure tls persisted");
+        var httpsRuleItems = ((ArrayList)((Dictionary<string, object>)((Dictionary<string, object>)httpsCfg["proxy_rules"])["routing"])["rules"]).Cast<Dictionary<string, object>>().ToArray();
+        Check(httpsRuleItems.Length == 1 && (string)httpsRuleItems[0]["name"] == AntigravityLauncher.UpstreamDirectRuleName
+            && ((ArrayList)httpsRuleItems[0]["domains"]).Cast<string>().First() == "proxy.example.com", "domain direct rule added");
 
         // File deployment, tamper repair, and removal
         string tempRoot = Path.Combine(Path.GetTempPath(), "ag-launcher-test-" + Guid.NewGuid().ToString("N"));

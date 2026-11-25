@@ -1,5 +1,6 @@
 #include "pb_internal.h"
 #include "pb_tls.h"
+#include "pb_schannel.h"
 
 // Relay: TCP/UDP relay servers and per-connection worker threads.
 
@@ -643,6 +644,7 @@ DWORD WINAPI connection_handler(LPVOID arg)
     }
 
     ld_metadata_emit(metadata_flow,metadata_pid,metadata_family,metadata_port,proxy_config_id,LD_META_UPSTREAM,0,0,0);
+    PB_TLS_CLIENT *upstream_tls = NULL;
     if (proxy->type == PROXY_TYPE_SOCKS5)
     {
         int rc;
@@ -673,6 +675,57 @@ DWORD WINAPI connection_handler(LPVOID arg)
         ld_metadata_emit(metadata_flow,metadata_pid,metadata_family,metadata_port,proxy_config_id,LD_META_CONNECT,rc==0?0:1,0,0);
         if (rc != 0)
         {
+            closesocket(client_sock);
+            closesocket(socks_sock);
+            return 0;
+        }
+    }
+    else if (proxy->type == PROXY_TYPE_HTTPS)
+    {
+        ld_metadata_http_reset();
+        char tls_host[254], cached_domain[256], host_buf[270];
+        const char *target_host = NULL;
+        if (proxy->send_domain_to_proxy && dest_port == 443 &&
+            ld_tls_peek_server_name(client_sock, tls_host, sizeof(tls_host), 1000) &&
+            ld_tls_is_openai_host(tls_host))
+        {
+            target_host = tls_host;
+        }
+        else if (proxy->send_domain_to_proxy && (is_ipv6
+            ? dns_cache_lookup_v6(dest_ip6, cached_domain, sizeof(cached_domain))
+            : dns_cache_lookup(dest_ip, cached_domain, sizeof(cached_domain))))
+        {
+            target_host = cached_domain;
+        }
+        else if (is_ipv6)
+        {
+            char addr_str[64];
+            inet_ntop(AF_INET6, dest_ip6, addr_str, sizeof(addr_str));
+            snprintf(host_buf, sizeof(host_buf), "[%s]", addr_str);
+            target_host = host_buf;
+        }
+        else
+        {
+            format_ip_address(dest_ip, host_buf, sizeof(host_buf));
+            target_host = host_buf;
+        }
+
+        DWORD tls_error = 0;
+        upstream_tls = pb_tls_client_open(socks_sock, proxy->host, proxy->tls_insecure, &tls_error);
+        if (upstream_tls == NULL)
+        {
+            ld_metadata_emit(metadata_flow,metadata_pid,metadata_family,metadata_port,proxy_config_id,LD_META_CONNECT,1,tls_error,0);
+            closesocket(client_sock);
+            closesocket(socks_sock);
+            return 0;
+        }
+        int status = 0; DWORD error = 0;
+        int rc = pb_tls_client_http_connect(upstream_tls, target_host, dest_port, proxy->username, proxy->password, &status, &error);
+        ld_metadata_http_status(status); ld_metadata_http_failure(error);
+        ld_metadata_emit(metadata_flow,metadata_pid,metadata_family,metadata_port,proxy_config_id,LD_META_CONNECT,rc==0?0:1,ld_metadata_http_get_error(),ld_metadata_http_get_status());
+        if (rc != 0)
+        {
+            pb_tls_client_close(upstream_tls);
             closesocket(client_sock);
             closesocket(socks_sock);
             return 0;
@@ -717,6 +770,16 @@ DWORD WINAPI connection_handler(LPVOID arg)
     DWORD bytes_returned = 0;
     WSAIoctl(socks_sock, SIO_KEEPALIVE_VALS, &keepalive_settings, sizeof(keepalive_settings), NULL, 0, &bytes_returned, NULL, NULL);
     WSAIoctl(client_sock, SIO_KEEPALIVE_VALS, &keepalive_settings, sizeof(keepalive_settings), NULL, 0, &bytes_returned, NULL, NULL);
+
+    if (upstream_tls != NULL)
+    {
+        pb_tls_client_relay(upstream_tls, client_sock);
+        pb_tls_client_close(upstream_tls);
+        closesocket(client_sock);
+        closesocket(socks_sock);
+        ld_metadata_emit(metadata_flow,metadata_pid,metadata_family,metadata_port,proxy_config_id,LD_META_CLOSE,0,0,0);
+        return 0;
+    }
 
     TRANSFER_CONFIG *transfer_config = (TRANSFER_CONFIG *)malloc(sizeof(TRANSFER_CONFIG));
 

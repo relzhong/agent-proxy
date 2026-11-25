@@ -23,7 +23,7 @@ $sources=@(
 $outDll=Join-Path $OutputDirectory 'version.dll'
 Push-Location $compile
 try{
-    & cl.exe /nologo /utf-8 /EHsc /std:c++17 /O2 /MT /GS /guard:cf /DNOMINMAX /DNDEBUG "/I$core\include" "/I$srcRoot" "/I$srcRoot\hde" @sources /LD /link /DYNAMICBASE /HIGHENTROPYVA /NXCOMPAT /guard:cf /CETCOMPAT "/DEF:$srcRoot\proxy\version.def" ws2_32.lib winhttp.lib "/OUT:$outDll"
+    & cl.exe /nologo /utf-8 /EHsc /std:c++17 /O2 /MT /GS /guard:cf /DNOMINMAX /DNDEBUG "/I$core\include" "/I$srcRoot" "/I$srcRoot\hde" @sources /LD /link /DYNAMICBASE /HIGHENTROPYVA /NXCOMPAT /guard:cf /CETCOMPAT "/DEF:$srcRoot\proxy\version.def" ws2_32.lib winhttp.lib secur32.lib "/OUT:$outDll"
     if($LASTEXITCODE -ne 0){throw 'Antigravity proxy version.dll compilation failed.'}
 }finally{
     Pop-Location

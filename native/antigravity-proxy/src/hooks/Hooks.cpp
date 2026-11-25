@@ -32,6 +32,7 @@
 #include "../network/SocketFamily.hpp"
 #include "../network/LocalTargetPolicy.hpp"
 #include "../network/TrafficMonitor.hpp"
+#include "../network/TlsBridge.hpp"
 #include "../injection/ProcessInjector.hpp"
 #include "ProcessName.hpp"
 
@@ -247,6 +248,7 @@ static std::unordered_map<LPWSAOVERLAPPED, std::shared_ptr<UdpOverlappedSendCtx>
 static std::unordered_map<LPWSAOVERLAPPED, std::shared_ptr<UdpOverlappedRecvCtx>> g_udpOvlRecv;
 static std::mutex g_udpOvlMtx;
 static SOCKET ConnectTcpToProxyServer(const Core::ProxyConfig& proxy);
+static bool EnsureTlsBridgePort(const Core::ProxyConfig& proxy, uint16_t* outPort);
 
 // 为了避免日志被大量非目标进程淹没，这里仅首次记录“跳过注入”的进程名
 static std::unordered_map<std::string, bool> g_loggedSkipProcesses;
@@ -578,7 +580,26 @@ static AgentExitIpEvidence ProbeProxyExitIpEvidence() {
         return evidence;
     }
 
-    SOCKET sock = ConnectTcpToProxyServer(config.proxy);
+    const std::string proxyType = ToLowerAsciiCopy(config.proxy.type);
+    SOCKET sock = INVALID_SOCKET;
+    if (proxyType == "https") {
+        uint16_t bridgePort = 0;
+        if (EnsureTlsBridgePort(config.proxy, &bridgePort)) {
+            sock = fpSocket ? fpSocket(AF_INET, SOCK_STREAM, IPPROTO_TCP) : socket(AF_INET, SOCK_STREAM, IPPROTO_TCP);
+            if (sock != INVALID_SOCKET) {
+                sockaddr_in local{};
+                local.sin_family = AF_INET;
+                local.sin_addr.s_addr = htonl(INADDR_LOOPBACK);
+                local.sin_port = htons(bridgePort);
+                if ((fpConnect ? fpConnect(sock, (sockaddr*)&local, sizeof(local)) : connect(sock, (sockaddr*)&local, sizeof(local))) != 0) {
+                    CloseSocketCompat(sock);
+                    sock = INVALID_SOCKET;
+                }
+            }
+        }
+    } else {
+        sock = ConnectTcpToProxyServer(config.proxy);
+    }
     if (sock == INVALID_SOCKET) {
         evidence.error = "connect proxy failed, WSA=" + std::to_string(WSAGetLastError());
         return evidence;
@@ -588,10 +609,9 @@ static AgentExitIpEvidence ProbeProxyExitIpEvidence() {
     wrapped.SetTimeouts(config.timeout.recv_ms, config.timeout.send_ms);
 
     bool ready = false;
-    const std::string proxyType = ToLowerAsciiCopy(config.proxy.type);
     if (proxyType == "socks5") {
         ready = Network::Socks5Client::Handshake(sock, "ipinfo.io", 80);
-    } else if (proxyType == "http") {
+    } else if (proxyType == "http" || proxyType == "https") {
         ready = true;
     } else {
         evidence.error = "unsupported proxy.type=" + config.proxy.type;
@@ -605,7 +625,7 @@ static AgentExitIpEvidence ProbeProxyExitIpEvidence() {
         return evidence;
     }
 
-    const std::string request = BuildIpInfoHttpRequest(proxyType == "http");
+    const std::string request = BuildIpInfoHttpRequest(proxyType == "http" || proxyType == "https");
     if (!Network::SocketIo::SendAll(sock, request.c_str(), (int)request.size(), config.timeout.send_ms)) {
         evidence.error = "send ip probe failed, WSA=" + std::to_string(WSAGetLastError());
         CloseSocketCompat(sock);
@@ -1252,6 +1272,16 @@ static bool BuildProxyAddr(const Core::ProxyConfig& proxy, sockaddr_in* proxyAdd
         memset(proxyAddr, 0, sizeof(sockaddr_in));
         proxyAddr->sin_family = AF_INET;
     }
+    if (proxy.type == "https") {
+        uint16_t bridgePort = 0;
+        if (!EnsureTlsBridgePort(proxy, &bridgePort)) {
+            return false;
+        }
+        proxyAddr->sin_family = AF_INET;
+        proxyAddr->sin_addr.s_addr = htonl(INADDR_LOOPBACK);
+        proxyAddr->sin_port = htons(bridgePort);
+        return true;
+    }
     std::vector<sockaddr_storage> endpoints;
     std::vector<int> endpointLens;
     if (!ResolveProxyEndpoints(proxy, AF_INET, &endpoints, &endpointLens)) {
@@ -1270,6 +1300,19 @@ static bool BuildProxyAddrV6(const Core::ProxyConfig& proxy, sockaddr_in6* proxy
         memset(proxyAddr, 0, sizeof(sockaddr_in6));
     }
     proxyAddr->sin6_family = AF_INET6;
+    if (proxy.type == "https") {
+        uint16_t bridgePort = 0;
+        if (!EnsureTlsBridgePort(proxy, &bridgePort)) {
+            return false;
+        }
+        memset(&proxyAddr->sin6_addr, 0, sizeof(proxyAddr->sin6_addr));
+        proxyAddr->sin6_addr.s6_addr[10] = 0xff;
+        proxyAddr->sin6_addr.s6_addr[11] = 0xff;
+        proxyAddr->sin6_addr.s6_addr[12] = 127;
+        proxyAddr->sin6_addr.s6_addr[15] = 1;
+        proxyAddr->sin6_port = htons(bridgePort);
+        return true;
+    }
 
     std::vector<sockaddr_storage> endpoints;
     std::vector<int> endpointLens;
@@ -1408,7 +1451,8 @@ static SOCKET ConnectTcpToProxyServer(const Core::ProxyConfig& proxy) {
     int lastErr = 0;
     for (size_t i = 0; i < endpoints.size(); ++i) {
         const int family = endpoints[i].ss_family;
-        SOCKET tcpSock = socket(family, SOCK_STREAM, IPPROTO_TCP);
+        SOCKET tcpSock = fpSocket ? fpSocket(family, SOCK_STREAM, IPPROTO_TCP)
+                                  : socket(family, SOCK_STREAM, IPPROTO_TCP);
         if (tcpSock == INVALID_SOCKET) {
             lastErr = WSAGetLastError();
             Core::Logger::Warn("SOCKS5 UDP: 创建 TCP 控制连接失败, endpoint=" + ProxyEndpointToString(endpoints[i]) +
@@ -1455,6 +1499,17 @@ static SOCKET ConnectTcpToProxyServer(const Core::ProxyConfig& proxy) {
     Core::Logger::Error("SOCKS5 UDP: 所有代理候选均连接失败, proxy=" + proxy.host + ":" + std::to_string(proxy.port) +
                         (lastErr ? ", 最后WSA错误码=" + std::to_string(lastErr) : std::string("")));
     return INVALID_SOCKET;
+}
+
+static bool EnsureTlsBridgePort(const Core::ProxyConfig& proxy, uint16_t* outPort) {
+    Network::TlsBridge::RawOps ops;
+    ops.sendFn = fpSend;
+    ops.recvFn = fpRecv;
+    ops.closeFn = fpCloseSocket;
+    ops.dialUpstream = [proxy]() -> SOCKET {
+        return ConnectTcpToProxyServer(proxy);
+    };
+    return Network::TlsBridge::Instance().EnsureStarted(ops, outPort);
 }
 
 static void DropUdpOverlappedContext(LPWSAOVERLAPPED ovl) {
@@ -2015,7 +2070,7 @@ static bool DoProxyHandshake(SOCKET s, const std::string& host, uint16_t port) {
             WSASetLastError(WSAECONNREFUSED);
             return false;
         }
-    } else if (config.proxy.type == "http") {
+    } else if (config.proxy.type == "http" || config.proxy.type == "https") {
         if (!Network::HttpConnectClient::Handshake(s, host, port, handshakeBudgetMs)) {
             Core::Logger::Error("HTTP CONNECT 握手失败, sock=" + std::to_string((unsigned long long)s) +
                                 ", 目标=" + host + ":" + std::to_string(port));
@@ -5017,6 +5072,7 @@ namespace Hooks {
             g_connectExTrampolineByTarget.clear();
             fpConnectEx = NULL;
         }
+        Network::TlsBridge::Instance().Stop();
         MH_DisableHook(MH_ALL_HOOKS);
         MH_Uninitialize();
     }

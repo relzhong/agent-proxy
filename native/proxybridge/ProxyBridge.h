@@ -25,7 +25,8 @@ PROXYBRIDGE_API void ProxyBridge_ConfigureMetadata(MetadataCallback callback, co
 
 typedef enum {
     PROXY_TYPE_HTTP = 0,
-    PROXY_TYPE_SOCKS5 = 1
+    PROXY_TYPE_SOCKS5 = 1,
+    PROXY_TYPE_HTTPS = 2
 } ProxyType;
 
 typedef enum {
@@ -65,6 +66,7 @@ PROXYBRIDGE_API BOOL ProxyBridge_EditRule(UINT32 rule_id, const char* process_na
 PROXYBRIDGE_API BOOL ProxyBridge_MoveRuleToPosition(UINT32 rule_id, UINT32 new_position);  // Move rule to specific position (1=first, 2=second, etc)
 PROXYBRIDGE_API UINT32 ProxyBridge_GetRulePosition(UINT32 rule_id);  // Get current position of rule in list (1-based)
 PROXYBRIDGE_API void ProxyBridge_SetLocalhostViaProxy(BOOL enable);
+PROXYBRIDGE_API void ProxyBridge_SetTlsInsecure(BOOL insecure);
 PROXYBRIDGE_API void ProxyBridge_SetLogCallback(LogCallback callback);
 PROXYBRIDGE_API void ProxyBridge_SetConnectionCallback(ConnectionCallback callback);
 PROXYBRIDGE_API void ProxyBridge_SetTrafficLoggingEnabled(BOOL enable);

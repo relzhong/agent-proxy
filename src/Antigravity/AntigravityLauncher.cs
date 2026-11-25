@@ -27,8 +27,7 @@ namespace AgentProxy
         {
             if (String.IsNullOrWhiteSpace(protocol)) return "http";
             string value = protocol.Trim().ToLowerInvariant();
-            if (value == "http" || value == "https") return "http";
-            if (value == "socks5") return "socks5";
+            if (value == "http" || value == "https" || value == "socks5") return value;
             throw new ArgumentException("Unsupported Antigravity proxy protocol: " + protocol);
         }
 
@@ -162,7 +161,7 @@ namespace AgentProxy
             return false;
         }
 
-        internal static string BuildConfigJson(string existingJson, string host, int port, string protocol, string username = null, string password = null)
+        internal static string BuildConfigJson(string existingJson, string host, int port, string protocol, string username = null, string password = null, bool allowInsecureTls = false)
         {
             ValidateEndpoint(host, port, protocol, username, password);
             string normalizedHost = host.Trim();
@@ -193,6 +192,7 @@ namespace AgentProxy
             proxy["type"] = normalizedProtocol;
             proxy["username"] = username ?? "";
             proxy["password"] = password ?? "";
+            proxy["tls_insecure"] = (normalizedProtocol == "https" && allowInsecureTls);
 
             if (!root.ContainsKey("fake_ip"))
             {
@@ -278,18 +278,34 @@ namespace AgentProxy
             }
 
             IPAddress upstreamIp;
-            if (IPAddress.TryParse(normalizedHost, out upstreamIp)
-                && upstreamIp.AddressFamily == System.Net.Sockets.AddressFamily.InterNetwork
-                && !AgentProxy.ProcessProxy.ProxyPlan.IsLoopback(upstreamIp))
+            if (IPAddress.TryParse(normalizedHost, out upstreamIp))
+            {
+                if (upstreamIp.AddressFamily == System.Net.Sockets.AddressFamily.InterNetwork
+                    && !AgentProxy.ProcessProxy.ProxyPlan.IsLoopback(upstreamIp))
+                {
+                    ruleList.Insert(0, new Dictionary<string, object> {
+                        { "name", UpstreamDirectRuleName },
+                        { "enabled", true },
+                        { "action", "direct" },
+                        { "priority", 0 },
+                        { "ip_cidrs_v4", new[] { upstreamIp.ToString() + "/32" } },
+                        { "ip_cidrs_v6", new string[0] },
+                        { "domains", new string[0] },
+                        { "ports", new string[0] },
+                        { "protocols", new[] { "tcp", "udp" } }
+                    });
+                }
+            }
+            else if (!normalizedHost.Equals("localhost", StringComparison.OrdinalIgnoreCase))
             {
                 ruleList.Insert(0, new Dictionary<string, object> {
                     { "name", UpstreamDirectRuleName },
                     { "enabled", true },
                     { "action", "direct" },
                     { "priority", 0 },
-                    { "ip_cidrs_v4", new[] { upstreamIp.ToString() + "/32" } },
+                    { "ip_cidrs_v4", new string[0] },
                     { "ip_cidrs_v6", new string[0] },
-                    { "domains", new string[0] },
+                    { "domains", new[] { normalizedHost } },
                     { "ports", new string[0] },
                     { "protocols", new[] { "tcp", "udp" } }
                 });
@@ -318,7 +334,7 @@ namespace AgentProxy
             return Path.Combine(root, "antigravity-proxy", "version.dll");
         }
 
-        internal static void DeployAndWriteConfig(string executablePath, string host, int port, string protocol, string bundledDllPath = null, string username = null, string password = null)
+        internal static void DeployAndWriteConfig(string executablePath, string host, int port, string protocol, string bundledDllPath = null, string username = null, string password = null, bool allowInsecureTls = false)
         {
             string dir = Path.GetDirectoryName(Path.GetFullPath(executablePath));
             string sourceDll = bundledDllPath ?? BundledDllPath();
@@ -334,7 +350,7 @@ namespace AgentProxy
 
             string configPath = Path.Combine(dir, "config.json");
             string existing = File.Exists(configPath) ? File.ReadAllText(configPath, new UTF8Encoding(false)) : null;
-            string updated = BuildConfigJson(existing, host, port, protocol, username, password);
+            string updated = BuildConfigJson(existing, host, port, protocol, username, password, allowInsecureTls);
             File.WriteAllText(configPath, updated, new UTF8Encoding(false));
         }
 

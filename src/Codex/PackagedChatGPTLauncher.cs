@@ -31,12 +31,13 @@ internal static class PackagedChatGPTLauncher
     {
         Uri proxy;
         if (args.Length < 1 || args.Length > 3 || !Uri.TryCreate(args[0], UriKind.Absolute, out proxy)
-            || (proxy.Scheme != Uri.UriSchemeHttp && !proxy.Scheme.Equals("socks5", StringComparison.OrdinalIgnoreCase)
+            || (proxy.Scheme != Uri.UriSchemeHttp && proxy.Scheme != Uri.UriSchemeHttps
+                && !proxy.Scheme.Equals("socks5", StringComparison.OrdinalIgnoreCase)
                 && !proxy.Scheme.Equals("direct", StringComparison.OrdinalIgnoreCase))
             || String.IsNullOrEmpty(proxy.Host) || proxy.Port <= 0
             || proxy.AbsolutePath != "/")
         {
-            Console.Error.WriteLine("Usage: PackagedChatGPTLauncher.exe (http|socks5|direct)://host:port [cdp-port [expected-package-executable]]");
+            Console.Error.WriteLine("Usage: PackagedChatGPTLauncher.exe (http|https|socks5|direct)://host:port [cdp-port [expected-package-executable]]");
             return 2;
         }
 
@@ -101,10 +102,16 @@ internal static class PackagedChatGPTLauncher
                                   : "localhost" + separator + "127.0.0.1" + separator + "::1";
         Uri uri;
         System.Net.IPAddress ip;
-        if (Uri.TryCreate(proxyUrl, UriKind.Absolute, out uri) && !String.IsNullOrEmpty(uri.Host)
-            && System.Net.IPAddress.TryParse(uri.Host, out ip) && !System.Net.IPAddress.IsLoopback(ip))
+        if (Uri.TryCreate(proxyUrl, UriKind.Absolute, out uri) && !String.IsNullOrEmpty(uri.Host))
         {
-            list += separator + ip.ToString();
+            if (System.Net.IPAddress.TryParse(uri.Host, out ip))
+            {
+                if (!System.Net.IPAddress.IsLoopback(ip)) list += separator + ip.ToString();
+            }
+            else if (!uri.Host.Equals("localhost", StringComparison.OrdinalIgnoreCase))
+            {
+                list += separator + uri.Host;
+            }
         }
         return list;
     }

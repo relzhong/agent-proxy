@@ -21,6 +21,7 @@ namespace AgentProxy.ProcessProxy
         public string ProxyType { get; set; }
         public string ProxyUsername { get; set; }
         public string ProxyPassword { get; set; }
+        public bool AllowInsecureTls { get; set; }
         public bool Process443Approved { get; set; }
         public bool DriverApproved { get; set; }
 
@@ -49,14 +50,38 @@ namespace AgentProxy.ProcessProxy
                 foreach (string helper in CoreHelperPaths) CoreHelperScope.ValidatePath(helper);
             }
             IPAddress upstream;
-            if (!IPAddress.TryParse(ProxyHost, out upstream) || !IsValidUpstream(upstream)
-                || ProxyPort < 1 || ProxyPort > 65535)
-                throw new ArgumentException("The upstream must be a literal unicast IPv4 or loopback address and a valid port.");
+            if (ProxyPort < 1 || ProxyPort > 65535
+                || (IPAddress.TryParse(ProxyHost, out upstream) ? !IsValidUpstream(upstream) : !IsValidDomainHost(ProxyHost)))
+                throw new ArgumentException("The upstream must be a valid unicast IPv4, loopback, or domain hostname and a valid port.");
             NormalizeProxyType(ProxyType);
             ValidateCredential(ProxyUsername, "Proxy username");
             ValidateCredential(ProxyPassword, "Proxy password");
             if (!String.IsNullOrEmpty(ProxyPassword) && String.IsNullOrEmpty(ProxyUsername))
                 throw new ArgumentException("Proxy password requires a proxy username.");
+        }
+
+        internal static bool IsValidDomainHost(string host)
+        {
+            if (String.IsNullOrWhiteSpace(host)) return false;
+            if (host != host.Trim()) return false;
+            if (host.Length < 1 || host.Length > 253) return false;
+            if (host.Any(c => c > 127)) return false;
+            string[] labels = host.Split('.');
+            if (labels.Length == 1)
+                return host.Equals("localhost", StringComparison.OrdinalIgnoreCase);
+            foreach (string label in labels)
+            {
+                if (label.Length < 1 || label.Length > 63) return false;
+                if (label[0] == '-' || label[label.Length - 1] == '-') return false;
+                foreach (char c in label)
+                {
+                    if (!((c >= 'a' && c <= 'z') || (c >= 'A' && c <= 'Z') || (c >= '0' && c <= '9') || c == '-'))
+                        return false;
+                }
+            }
+            string tld = labels[labels.Length - 1];
+            if (tld.All(char.IsDigit)) return false;
+            return true;
         }
 
         internal static void ValidateCredential(string value, string label)
@@ -72,7 +97,7 @@ namespace AgentProxy.ProcessProxy
         {
             if (String.IsNullOrWhiteSpace(proxyType)) return "http";
             string normalized = proxyType.Trim().ToLowerInvariant();
-            if (normalized == "http" || normalized == "socks5") return normalized;
+            if (normalized == "http" || normalized == "socks5" || normalized == "https") return normalized;
             throw new ArgumentException("Unsupported proxy type: " + proxyType);
         }
 
@@ -97,10 +122,31 @@ namespace AgentProxy.ProcessProxy
         internal static string BuildDirectHosts(string proxyHost)
         {
             const string baseHosts = "127.0.0.0-127.255.255.255;::1;::ffff:127.0.0.0/104";
+            if (String.IsNullOrWhiteSpace(proxyHost)) return baseHosts;
             IPAddress upstream;
-            if (!String.IsNullOrEmpty(proxyHost) && IPAddress.TryParse(proxyHost, out upstream)
-                && IsValidUpstream(upstream) && !IsLoopback(upstream))
-                return baseHosts + ";" + upstream.ToString();
+            if (IPAddress.TryParse(proxyHost, out upstream))
+            {
+                if (IsValidUpstream(upstream) && !IsLoopback(upstream))
+                    return baseHosts + ";" + upstream.ToString();
+                return baseHosts;
+            }
+            if (IsValidDomainHost(proxyHost) && !proxyHost.Equals("localhost", StringComparison.OrdinalIgnoreCase))
+            {
+                try
+                {
+                    var extras = new List<string>();
+                    foreach (IPAddress addr in Dns.GetHostAddresses(proxyHost))
+                    {
+                        if (IsValidUpstream(addr) && !IsLoopback(addr))
+                        {
+                            string s = addr.ToString();
+                            if (!extras.Contains(s)) extras.Add(s);
+                        }
+                    }
+                    if (extras.Count > 0) return baseHosts + ";" + String.Join(";", extras.ToArray());
+                }
+                catch { }
+            }
             return baseHosts;
         }
         public string Serialize() { Validate(); return new JavaScriptSerializer().Serialize(this); }
@@ -118,9 +164,10 @@ namespace AgentProxy.ProcessProxy
         public bool Matches(string executable, IPAddress destination, int port, bool tcp)
         {
             Validate();
-            IPAddress upstream = IPAddress.Parse(ProxyHost);
+            IPAddress upstream;
+            bool hasIpUpstream = IPAddress.TryParse(ProxyHost, out upstream);
             return tcp && port == 443 && destination != null && !IsLoopback(destination)
-                && !destination.Equals(upstream)
+                && (!hasIpUpstream || !destination.Equals(upstream))
                 && !destination.Equals(IPAddress.Any) && !destination.Equals(IPAddress.IPv6Any)
                 && (ExecutablePath.Equals(executable, StringComparison.OrdinalIgnoreCase)
                     || (BrowserHelperPaths ?? new string[0]).Contains(executable, StringComparer.OrdinalIgnoreCase)
@@ -237,14 +284,14 @@ namespace AgentProxy.ProcessProxy
                 foreach(Process process in Process.GetProcessesByName(name))
                     using(process) try {
                         string path=process.MainModule.FileName;
-                        var candidate=new ProxyPlan { ExecutablePath=path,ProxyHost=current.ProxyHost,ProxyPort=current.ProxyPort,ProxyType=current.ProxyType,ProxyUsername=current.ProxyUsername,ProxyPassword=current.ProxyPassword,Process443Approved=true,DriverApproved=true };
+                        var candidate=new ProxyPlan { ExecutablePath=path,ProxyHost=current.ProxyHost,ProxyPort=current.ProxyPort,ProxyType=current.ProxyType,ProxyUsername=current.ProxyUsername,ProxyPassword=current.ProxyPassword,AllowInsecureTls=current.AllowInsecureTls,Process443Approved=true,DriverApproved=true };
                         candidate.Validate();
                         if(PackageName(path)!=family || PackageVersion(path)<version) continue;
                         executable=path;version=PackageVersion(path);
                     } catch(ArgumentException) {} catch(FormatException) {} catch(System.ComponentModel.Win32Exception) {} catch(InvalidOperationException) {}
             string next=Fingerprint(executable);
             if(next==fingerprint) return cachedPlan;
-            var plan=new ProxyPlan { ExecutablePath=executable,ProxyHost=current.ProxyHost,ProxyPort=current.ProxyPort,ProxyType=current.ProxyType,ProxyUsername=current.ProxyUsername,ProxyPassword=current.ProxyPassword,Process443Approved=true,DriverApproved=true };
+            var plan=new ProxyPlan { ExecutablePath=executable,ProxyHost=current.ProxyHost,ProxyPort=current.ProxyPort,ProxyType=current.ProxyType,ProxyUsername=current.ProxyUsername,ProxyPassword=current.ProxyPassword,AllowInsecureTls=current.AllowInsecureTls,Process443Approved=true,DriverApproved=true };
             // Establish registered package identity before reading any copied runtime candidates.
             ProxySecurity.VerifyRegisteredPackage(plan);
             plan.BrowserHelperPaths=BrowserHelperScope.Resolve(executable);
@@ -275,6 +322,7 @@ namespace AgentProxy.ProcessProxy
     {
         uint AddHttpProxy(string host, ushort port, string username = null, string password = null);
         uint AddSocks5Proxy(string host, ushort port, string username = null, string password = null);
+        uint AddHttpsProxy(string host, ushort port, string username = null, string password = null, bool allowInsecureTls = false);
         uint AddDirectLoopbackRule(string proxyHost = null);
         uint AddProcess443Rule(string executablePath, uint proxyId);
         void DeleteRule(uint id);
@@ -293,6 +341,7 @@ namespace AgentProxy.ProcessProxy
         private string upstreamType;
         private string upstreamUser;
         private string upstreamPass;
+        private bool upstreamInsecureTls;
         private string packageFamily;
         private uint proxy;
         private bool engineMayBeRunning;
@@ -308,9 +357,12 @@ namespace AgentProxy.ProcessProxy
             try
             {
                 string type = ProxyPlan.NormalizeProxyType(plan.ProxyType);
-                proxy = type == "socks5"
-                    ? engine.AddSocks5Proxy(plan.ProxyHost, (ushort)plan.ProxyPort, plan.ProxyUsername, plan.ProxyPassword)
-                    : engine.AddHttpProxy(plan.ProxyHost, (ushort)plan.ProxyPort, plan.ProxyUsername, plan.ProxyPassword);
+                if (type == "socks5")
+                    proxy = engine.AddSocks5Proxy(plan.ProxyHost, (ushort)plan.ProxyPort, plan.ProxyUsername, plan.ProxyPassword);
+                else if (type == "https")
+                    proxy = engine.AddHttpsProxy(plan.ProxyHost, (ushort)plan.ProxyPort, plan.ProxyUsername, plan.ProxyPassword, plan.AllowInsecureTls);
+                else
+                    proxy = engine.AddHttpProxy(plan.ProxyHost, (ushort)plan.ProxyPort, plan.ProxyUsername, plan.ProxyPassword);
                 if (proxy == 0) throw new InvalidOperationException("Proxy configuration failed.");
                 uint direct = engine.AddDirectLoopbackRule(plan.ProxyHost);
                 if (direct == 0) throw new InvalidOperationException("Loopback protection failed.");
@@ -334,6 +386,7 @@ namespace AgentProxy.ProcessProxy
                 upstreamHost=plan.ProxyHost;upstreamPort=plan.ProxyPort;upstreamType=type;
                 upstreamUser=plan.ProxyUsername ?? String.Empty;
                 upstreamPass=plan.ProxyPassword ?? String.Empty;
+                upstreamInsecureTls=plan.AllowInsecureTls;
                 packageFamily=PackageProxyMaintenance.PackageName(plan.ExecutablePath);
                 foreach(string path in Paths(plan)) executableRules.Add(path);
             }
@@ -349,7 +402,7 @@ namespace AgentProxy.ProcessProxy
         {
             plan.Validate();
             if(!Ready || disposed || plan.ProxyHost!=upstreamHost || plan.ProxyPort!=upstreamPort || ProxyPlan.NormalizeProxyType(plan.ProxyType)!=upstreamType
-                || (plan.ProxyUsername ?? String.Empty)!=upstreamUser || (plan.ProxyPassword ?? String.Empty)!=upstreamPass)
+                || (plan.ProxyUsername ?? String.Empty)!=upstreamUser || (plan.ProxyPassword ?? String.Empty)!=upstreamPass || plan.AllowInsecureTls!=upstreamInsecureTls)
                 throw new InvalidOperationException("A live scope refresh cannot change its upstream.");
             if(PackageProxyMaintenance.PackageName(plan.ExecutablePath)!=packageFamily)
                 throw new InvalidOperationException("A live scope refresh cannot change package family.");
@@ -437,6 +490,7 @@ namespace AgentProxy.ProcessProxy
         private AddRule addRule;
         private IdOperation deleteRule, deleteProxy;
         private Operation start, stop;
+        private BoolOption setTlsInsecure;
         private readonly ProxyDiagnostic diagnostic;
         private uint metadataProxy,metadataDirect;
         private bool metadataConfigured;
@@ -469,6 +523,7 @@ namespace AgentProxy.ProcessProxy
                 stop = Bind<Operation>("ProxyBridge_Stop");
                 Bind<BoolOption>("ProxyBridge_SetLocalhostViaProxy")(0);
                 Bind<BoolOption>("ProxyBridge_SetTrafficLoggingEnabled")(0);
+                setTlsInsecure = Bind<BoolOption>("ProxyBridge_SetTlsInsecure");
                 if(diagnostic!=null) configureMetadata=Bind<ConfigureMetadata>("ProxyBridge_ConfigureMetadata");
             }
             catch { Dispose(); throw; }
@@ -483,18 +538,23 @@ namespace AgentProxy.ProcessProxy
         // ClientHello name, rather than forwarding a possibly poisoned local IP.
         public uint AddHttpProxy(string host, ushort port, string username = null, string password = null)
         {
-            return AddProxyWithAuth(0, host, port, username, password);
+            return AddProxyWithAuth(0, host, port, username, password, false);
         }
         public uint AddSocks5Proxy(string host, ushort port, string username = null, string password = null)
         {
-            return AddProxyWithAuth(1, host, port, username, password);
+            return AddProxyWithAuth(1, host, port, username, password, false);
         }
-        private uint AddProxyWithAuth(int type, string host, ushort port, string username, string password)
+        public uint AddHttpsProxy(string host, ushort port, string username = null, string password = null, bool allowInsecureTls = false)
+        {
+            return AddProxyWithAuth(2, host, port, username, password, allowInsecureTls);
+        }
+        private uint AddProxyWithAuth(int type, string host, ushort port, string username, string password, bool allowInsecureTls)
         {
             IntPtr userPtr = IntPtr.Zero, passPtr = IntPtr.Zero;
             int userLen = 0, passLen = 0;
             try
             {
+                if (setTlsInsecure != null) setTlsInsecure(allowInsecureTls ? 1 : 0);
                 userPtr = AllocUtf8(username, out userLen);
                 passPtr = AllocUtf8(password, out passLen);
                 return metadataProxy = addProxy(type, host, port, userPtr, passPtr, 1);

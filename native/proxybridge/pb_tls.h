@@ -10,4 +10,6 @@ int ld_tls_peek_server_name(SOCKET client, char *host, size_t capacity, DWORD ti
 int ld_tls_is_openai_host(const char *host);
 int ld_tls_http_connect(SOCKET proxy, const char *host, unsigned short port, int *status, DWORD *error);
 int ld_tls_http_connect_auth(SOCKET proxy, const char *host, unsigned short port, const char *username, const char *password, int *status, DWORD *error);
+int ld_tls_format_connect_request(const char *host, unsigned short port, const char *username, const char *password, char *out, size_t out_cap);
+int ld_tls_parse_http_status(const char *response, int length);
 #endif

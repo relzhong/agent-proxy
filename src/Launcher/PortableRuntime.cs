@@ -13,6 +13,7 @@ namespace AgentProxy
         public int Port { get; set; }
         public string Protocol { get; set; }
         public bool Enhanced { get; set; }
+        public bool AllowInsecureTls { get; set; }
         public bool English { get; set; }
     }
 

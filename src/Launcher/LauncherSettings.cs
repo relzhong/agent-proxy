@@ -13,6 +13,7 @@ namespace AgentProxy
         public string Port { get; set; }
         public string Protocol { get; set; }
         public bool Enhanced { get; set; }
+        public bool AllowInsecureTls { get; set; }
         public bool English { get; set; }
         public string Username { get; set; }
         public string ProtectedPassword { get; set; }
@@ -84,6 +85,7 @@ namespace AgentProxy
                     Port = settings.Port ?? String.Empty,
                     Protocol = settings.Protocol ?? "http",
                     Enhanced = settings.Enhanced,
+                    AllowInsecureTls = settings.AllowInsecureTls,
                     English = settings.English,
                     Username = settings.Username ?? String.Empty,
                     ProtectedPassword = ProtectPassword(settings.Password)

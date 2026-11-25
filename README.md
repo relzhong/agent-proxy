@@ -21,14 +21,14 @@
 - **双客户端统一入口**
   - **ChatGPT / Codex (Store)**：保留应用包身份激活与注册表环境变量瞬时注入/恢复，内置浏览器（CUA）转发与读取兼容修复。
   - **Antigravity (Desktop)**：内置 `version.dll` 进程级代理注入，自动生成并同步 `%LOCALAPPDATA%\Programs\Antigravity\config.json`（静默加载、自动覆盖 `Antigravity.exe` 与 `language_server.exe`），每次启动校验并自动补回被更新清除的 `version.dll`，支持一键移除补丁。
-- **支持本机与局域网代理地址**
-  - 放宽回环地址限制，支持填写 `127.0.0.1` 或局域网/单播 IPv4（如 `192.168.x.x`）。
-  - 非回环上游 IP 会自动加入直连排除规则与 `NO_PROXY` / `bypass-list`，防止代理流量回环。
-- **HTTP / SOCKS5 双协议与账密认证**
-  - **Antigravity (Desktop)**：原生支持 `HTTP` 与 `SOCKS5` 以及可选用户名 / 密码认证（无需驱动与管理员权限）。
+- **支持本机、局域网 IP 与域名代理**
+  - 支持填写 `127.0.0.1`、局域网/单播 IPv4（如 `192.168.x.x`）或域名主机（如 `proxy.example.com`）。
+  - 非回环上游 IP / 域名会自动加入直连排除规则与 `NO_PROXY` / `bypass-list`，防止代理流量回环。
+- **HTTP / SOCKS5 / HTTPS 三协议、账密认证与自签名信任**
+  - **Antigravity (Desktop)**：原生支持 `HTTP`、`SOCKS5` 与 `HTTPS`（Windows SChannel TLS 握手），以及可选用户名/密码认证与自签名证书信任（无需驱动与管理员权限）。
   - **ChatGPT / Codex (Store)**：
-    - **普通模式（默认不勾选增强代理）**：仅支持无认证的 `HTTP / Mixed` 端口，无需驱动、无需管理员 UAC 授权。*注意：SOCKS5 与用户名/密码认证均不支持普通模式 Codex / ChatGPT，界面会明确提示需勾选增强代理。*
-    - **增强模式（可选勾选，WinDivert + ProxyBridge）**：同时支持 `HTTP` 与 `SOCKS5` 以及 HTTP Basic / SOCKS5 RFC 1929 用户名密码认证（含 OpenAI 域名 TLS SNI 主机名透传），自动追踪运行中的 Store 版本更新与延迟生成的 `codex.exe` / `node_repl.exe`。
+    - **普通模式（默认不勾选增强代理）**：支持无认证的 `HTTP / Mixed` 与系统信任证书的 `HTTPS`，无需驱动、无需管理员 UAC 授权。*注意：SOCKS5、用户名/密码认证与 HTTPS 自签名证书信任均不支持普通模式 Codex / ChatGPT，界面会明确提示需勾选增强代理。*
+    - **增强模式（可选勾选，WinDivert + ProxyBridge）**：同时支持 `HTTP`、`SOCKS5` 与 `HTTPS`（SChannel TLS + 可选仅针对代理跳的自签名证书信任），支持 HTTP Basic / SOCKS5 RFC 1929 认证（含 OpenAI 域名 TLS SNI 主机名透传），自动追踪运行中的 Store 版本更新与延迟生成的 `codex.exe` / `node_repl.exe`。
 - **配置记忆与凭据保护**
   - 启动器自动记住上次的目标应用、代理主机、端口、协议、增强代理开关、语言以及用户名/密码（保存到 `%LOCALAPPDATA%\AgentProxy\settings.json`，其中密码通过 Windows 当前用户 DPAPI 加密存储，命令行与诊断日志不记录明文凭据）。
 
@@ -40,9 +40,9 @@
 2. 完全退出目标客户端（ChatGPT / Codex 或 Antigravity）。
 3. 双击运行 `AgentProxy.exe`：
    - 选择 **启动目标**：`ChatGPT / Codex (Store)` 或 `Antigravity (Desktop)`。
-   - 填写 **代理主机**（本机 `127.0.0.1` 或局域网 IP）、**代理端口**、**代理协议**（`HTTP` / `SOCKS5`），如有需要可填写可选的 **用户名 / 密码**（重启后自动记住）。
-   - 若启动 **ChatGPT / Codex** 且仅使用无认证 `HTTP / Mixed` 端口，可直接点击 **启动 ChatGPT / Codex**；若使用 `SOCKS5` 或填写了代理用户名/密码，请勾选 **启用增强代理**。
-   - 若启动 **Antigravity**，选择 `HTTP` 或 `SOCKS5` 后点击 **部署代理并启动 Antigravity**（不需要管理员权限）。
+   - 填写 **代理主机**（本机 `127.0.0.1`、局域网 IP 或域名）、**代理端口**、**代理协议**（`HTTP` / `SOCKS5` / `HTTPS`），如有需要可填写可选 **用户名 / 密码**，选择 `HTTPS` 时可按需勾选 **信任自签名证书**（重启后自动记住）。
+   - 若启动 **ChatGPT / Codex** 且仅使用无认证 `HTTP` 或系统信任证书 `HTTPS`，可直接点击 **启动 ChatGPT / Codex**；若使用 `SOCKS5`、带用户名/密码的代理或 HTTPS 自签名证书信任，请勾选 **启用增强代理**。
+   - 若启动 **Antigravity**，选择 `HTTP`、`SOCKS5` 或 `HTTPS` 后点击 **部署代理并启动 Antigravity**（不需要管理员权限）。
 
 > 详细安全边界与组件校验机制参见 [免安装说明](docs/portable.md) 与 [增强代理技术文档](docs/process-proxy.md)。
 

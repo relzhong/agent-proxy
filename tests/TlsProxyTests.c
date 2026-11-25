@@ -1,5 +1,11 @@
+#define SECURITY_WIN32
 #include "pb_tls.h"
+#include "pb_schannel.h"
+#include <winsock2.h>
 #include <windows.h>
+#include <wincrypt.h>
+#include <security.h>
+#include <schannel.h>
 #include <stdio.h>
 #include <string.h>
 #include <stdlib.h>
@@ -43,6 +49,279 @@ static DWORD WINAPI proxy_reply(LPVOID arg)
     char reply[128];sprintf_s(reply,sizeof(reply),"HTTP/1.1 %d Test\r\n\r\nZ",s->status);
     send(s->socket,reply,7,0);Sleep(10);send(s->socket,reply+7,(int)strlen(reply)-7,0);return 0;
 }
+static PCCERT_CONTEXT create_self_signed_cert(HCRYPTPROV *out_prov, HCRYPTKEY *out_key, wchar_t *container_name, size_t container_cap)
+{
+    _snwprintf_s(container_name, container_cap, _TRUNCATE, L"AgentProxyTlsTest-%lu", GetCurrentProcessId());
+    CryptAcquireContextW(out_prov, container_name, NULL, PROV_RSA_AES, CRYPT_DELETEKEYSET);
+    if (!CryptAcquireContextW(out_prov, container_name, NULL, PROV_RSA_AES, CRYPT_NEWKEYSET | CRYPT_SILENT))
+        return NULL;
+    if (!CryptGenKey(*out_prov, AT_KEYEXCHANGE, (2048 << 16) | CRYPT_EXPORTABLE, out_key)) {
+        CryptReleaseContext(*out_prov, 0);
+        return NULL;
+    }
+    CERT_NAME_BLOB subject = {0};
+    if (!CertStrToNameW(X509_ASN_ENCODING, L"CN=localhost", CERT_X500_NAME_STR, NULL, NULL, &subject.cbData, NULL))
+        return NULL;
+    subject.pbData = (BYTE*)malloc(subject.cbData);
+    if (!subject.pbData || !CertStrToNameW(X509_ASN_ENCODING, L"CN=localhost", CERT_X500_NAME_STR, NULL, subject.pbData, &subject.cbData, NULL)) {
+        free(subject.pbData);
+        return NULL;
+    }
+    CRYPT_KEY_PROV_INFO kpi;
+    memset(&kpi, 0, sizeof(kpi));
+    kpi.pwszContainerName = container_name;
+    kpi.dwProvType = PROV_RSA_AES;
+    kpi.dwKeySpec = AT_KEYEXCHANGE;
+    CRYPT_ALGORITHM_IDENTIFIER sigAlg;
+    memset(&sigAlg, 0, sizeof(sigAlg));
+    sigAlg.pszObjId = szOID_RSA_SHA256RSA;
+    PCCERT_CONTEXT cert = CertCreateSelfSignCertificate(*out_prov, &subject, 0, &kpi, &sigAlg, NULL, NULL, NULL);
+    free(subject.pbData);
+    return cert;
+}
+
+typedef struct {
+    SOCKET sock;
+    PCCERT_CONTEXT cert;
+    int expected_auth;
+    int handshake_ok;
+    int request_matched;
+    int relay_echo_ok;
+} TlsServerArg;
+
+static DWORD WINAPI tls_proxy_server(LPVOID arg)
+{
+    TlsServerArg *s = (TlsServerArg*)arg;
+    SCHANNEL_CRED scred;
+    memset(&scred, 0, sizeof(scred));
+    scred.dwVersion = SCHANNEL_CRED_VERSION;
+    scred.cCreds = 1;
+    scred.paCred = &s->cert;
+    CredHandle cred;
+    CtxtHandle ctx;
+    BOOL has_ctx = FALSE;
+    if (AcquireCredentialsHandleA(NULL, UNISP_NAME_A, SECPKG_CRED_INBOUND, NULL, &scred, NULL, NULL, &cred, NULL) != SEC_E_OK)
+        return 1;
+
+    unsigned char inbuf[32768];
+    size_t inlen = 0;
+    SECURITY_STATUS sc = SEC_I_CONTINUE_NEEDED;
+    DWORD outFlags = 0;
+    while (sc == SEC_I_CONTINUE_NEEDED || sc == SEC_E_INCOMPLETE_MESSAGE) {
+        if (inlen == 0 || sc == SEC_E_INCOMPLETE_MESSAGE) {
+            int got = recv(s->sock, (char*)inbuf + inlen, (int)(sizeof(inbuf) - inlen), 0);
+            if (got <= 0) goto cleanup;
+            inlen += (size_t)got;
+        }
+        SecBuffer ib[2] = { { (unsigned long)inlen, SECBUFFER_TOKEN, inbuf }, { 0, SECBUFFER_EMPTY, NULL } };
+        SecBufferDesc id = { SECBUFFER_VERSION, 2, ib };
+        SecBuffer ob[1] = { { 0, SECBUFFER_TOKEN, NULL } };
+        SecBufferDesc od = { SECBUFFER_VERSION, 1, ob };
+        sc = AcceptSecurityContext(&cred, has_ctx ? &ctx : NULL, &id,
+            ASC_REQ_SEQUENCE_DETECT | ASC_REQ_REPLAY_DETECT | ASC_REQ_CONFIDENTIALITY | ASC_REQ_ALLOCATE_MEMORY | ASC_REQ_STREAM,
+            SECURITY_NATIVE_DREP, has_ctx ? NULL : &ctx, &od, &outFlags, NULL);
+        if (sc == SEC_I_CONTINUE_NEEDED || sc == SEC_E_OK) has_ctx = TRUE;
+        if (ob[0].cbBuffer > 0 && ob[0].pvBuffer) {
+            int sent = 0;
+            while (sent < (int)ob[0].cbBuffer) {
+                int w = send(s->sock, (const char*)ob[0].pvBuffer + sent, (int)ob[0].cbBuffer - sent, 0);
+                if (w <= 0) { FreeContextBuffer(ob[0].pvBuffer); goto cleanup; }
+                sent += w;
+            }
+            FreeContextBuffer(ob[0].pvBuffer);
+        }
+        if (sc == SEC_E_INCOMPLETE_MESSAGE) continue;
+        if (ib[1].BufferType == SECBUFFER_EXTRA && ib[1].cbBuffer > 0) {
+            memmove(inbuf, inbuf + (inlen - ib[1].cbBuffer), ib[1].cbBuffer);
+            inlen = ib[1].cbBuffer;
+        } else inlen = 0;
+        if (FAILED(sc) && sc != SEC_E_INCOMPLETE_MESSAGE) goto cleanup;
+    }
+    if (sc != SEC_E_OK) goto cleanup;
+    s->handshake_ok = 1;
+
+    SecPkgContext_StreamSizes sizes;
+    if (QueryContextAttributesA(&ctx, SECPKG_ATTR_STREAM_SIZES, &sizes) != SEC_E_OK) goto cleanup;
+
+    char req[4096];
+    int req_len = 0;
+    while (!strstr(req, "\r\n\r\n")) {
+        if (inlen == 0) {
+            int got = recv(s->sock, (char*)inbuf, sizeof(inbuf), 0);
+            if (got <= 0) goto cleanup;
+            inlen = (size_t)got;
+        }
+        SecBuffer db[4] = { { (unsigned long)inlen, SECBUFFER_DATA, inbuf }, {0}, {0}, {0} };
+        SecBufferDesc dd = { SECBUFFER_VERSION, 4, db };
+        sc = DecryptMessage(&ctx, &dd, 0, NULL);
+        if (sc == SEC_E_INCOMPLETE_MESSAGE) {
+            int got = recv(s->sock, (char*)inbuf + inlen, (int)(sizeof(inbuf) - inlen), 0);
+            if (got <= 0) goto cleanup;
+            inlen += (size_t)got;
+            continue;
+        }
+        if (sc != SEC_E_OK) goto cleanup;
+        for (int i = 0; i < 4; i++) {
+            if (db[i].BufferType == SECBUFFER_DATA && req_len + (int)db[i].cbBuffer < (int)sizeof(req) - 1) {
+                memcpy(req + req_len, db[i].pvBuffer, db[i].cbBuffer);
+                req_len += (int)db[i].cbBuffer;
+                req[req_len] = 0;
+            }
+        }
+        inlen = 0;
+        for (int i = 0; i < 4; i++) {
+            if (db[i].BufferType == SECBUFFER_EXTRA && db[i].cbBuffer > 0) {
+                memmove(inbuf, db[i].pvBuffer, db[i].cbBuffer);
+                inlen = db[i].cbBuffer;
+            }
+        }
+    }
+    const char *want = s->expected_auth
+        ? "CONNECT api.openai.com:443 HTTP/1.1\r\nHost: api.openai.com:443\r\nProxy-Authorization: Basic dXNlcjpwYXNz\r\nProxy-Connection: keep-alive\r\n\r\n"
+        : "CONNECT api.openai.com:443 HTTP/1.1\r\nHost: api.openai.com:443\r\nProxy-Connection: keep-alive\r\n\r\n";
+    s->request_matched = !strcmp(req, want);
+
+    // Send 200 Connection Established + an early tunneled sentinel byte 'Z' in one TLS record.
+    {
+        const char *ok_resp = "HTTP/1.1 200 Connection Established\r\n\r\nZ";
+        int rlen = (int)strlen(ok_resp);
+        unsigned char *wire = (unsigned char*)malloc(sizes.cbHeader + rlen + sizes.cbTrailer);
+        SecBuffer sb[4] = {
+            { sizes.cbHeader, SECBUFFER_STREAM_HEADER, wire },
+            { (unsigned long)rlen, SECBUFFER_DATA, wire + sizes.cbHeader },
+            { sizes.cbTrailer, SECBUFFER_STREAM_TRAILER, wire + sizes.cbHeader + rlen },
+            { 0, SECBUFFER_EMPTY, NULL }
+        };
+        memcpy(sb[1].pvBuffer, ok_resp, (size_t)rlen);
+        SecBufferDesc sd = { SECBUFFER_VERSION, 4, sb };
+        if (EncryptMessage(&ctx, 0, &sd, 0) == SEC_E_OK) {
+            int tot = (int)(sb[0].cbBuffer + sb[1].cbBuffer + sb[2].cbBuffer);
+            send(s->sock, (const char*)wire, tot, 0);
+        }
+        free(wire);
+    }
+
+    // Read relayed payload ("PING") and echo back ("PONG")
+    if (s->expected_auth) {
+        char payload[128] = {0};
+        int plen = 0;
+        while (plen < 4) {
+            if (inlen == 0) {
+                int got = recv(s->sock, (char*)inbuf, sizeof(inbuf), 0);
+                if (got <= 0) goto cleanup;
+                inlen = (size_t)got;
+            }
+            SecBuffer db[4] = { { (unsigned long)inlen, SECBUFFER_DATA, inbuf }, {0}, {0}, {0} };
+            SecBufferDesc dd = { SECBUFFER_VERSION, 4, db };
+            sc = DecryptMessage(&ctx, &dd, 0, NULL);
+            if (sc == SEC_E_INCOMPLETE_MESSAGE) {
+                int got = recv(s->sock, (char*)inbuf + inlen, (int)(sizeof(inbuf) - inlen), 0);
+                if (got <= 0) goto cleanup;
+                inlen += (size_t)got;
+                continue;
+            }
+            if (sc != SEC_E_OK) goto cleanup;
+            for (int i = 0; i < 4; i++) {
+                if (db[i].BufferType == SECBUFFER_DATA && plen + (int)db[i].cbBuffer < (int)sizeof(payload) - 1) {
+                    memcpy(payload + plen, db[i].pvBuffer, db[i].cbBuffer);
+                    plen += (int)db[i].cbBuffer;
+                    payload[plen] = 0;
+                }
+            }
+            inlen = 0;
+        }
+        if (!strcmp(payload, "PING")) {
+            const char *pong = "PONG";
+            unsigned char *wire = (unsigned char*)malloc(sizes.cbHeader + 4 + sizes.cbTrailer);
+            SecBuffer sb[4] = {
+                { sizes.cbHeader, SECBUFFER_STREAM_HEADER, wire },
+                { 4, SECBUFFER_DATA, wire + sizes.cbHeader },
+                { sizes.cbTrailer, SECBUFFER_STREAM_TRAILER, wire + sizes.cbHeader + 4 },
+                { 0, SECBUFFER_EMPTY, NULL }
+            };
+            memcpy(sb[1].pvBuffer, pong, 4);
+            SecBufferDesc sd = { SECBUFFER_VERSION, 4, sb };
+            if (EncryptMessage(&ctx, 0, &sd, 0) == SEC_E_OK) {
+                send(s->sock, (const char*)wire, (int)(sb[0].cbBuffer + sb[1].cbBuffer + sb[2].cbBuffer), 0);
+                s->relay_echo_ok = 1;
+            }
+            free(wire);
+        }
+    }
+
+cleanup:
+    if (has_ctx) DeleteSecurityContext(&ctx);
+    FreeCredentialsHandle(&cred);
+    return 0;
+}
+
+typedef struct { PB_TLS_CLIENT *tls; SOCKET client; } RelayThreadArg;
+static DWORD WINAPI run_tls_relay(LPVOID arg)
+{
+    RelayThreadArg *r = (RelayThreadArg*)arg;
+    pb_tls_client_relay(r->tls, r->client);
+    closesocket(r->client);
+    return 0;
+}
+
+static void schannel_tests(void)
+{
+    HCRYPTPROV prov = 0; HCRYPTKEY key = 0; wchar_t container[64];
+    PCCERT_CONTEXT cert = create_self_signed_cert(&prov, &key, container, 64);
+    CHECK(cert != NULL);
+
+    // 1. Strict cert validation must REJECT an untrusted self-signed cert
+    {
+        SOCKET a, b; pair(&a, &b);
+        TlsServerArg srv = { b, cert, 0, 0, 0, 0 };
+        HANDLE th = CreateThread(NULL, 0, tls_proxy_server, &srv, 0, NULL);
+        CHECK(th != NULL);
+        DWORD tls_err = 0;
+        PB_TLS_CLIENT *tls = pb_tls_client_open(a, "localhost", FALSE, &tls_err);
+        CHECK(tls == NULL);
+        CHECK(tls_err != 0);
+        closesocket(a);
+        WaitForSingleObject(th, 2000); CloseHandle(th);
+        closesocket(b);
+    }
+
+    // 2. Self-signed trust enabled (insecure=TRUE) succeeds, sends Basic auth CONNECT, preserves 'Z', and relays bidirectionally
+    {
+        SOCKET a, b, app_client, app_relay;
+        pair(&a, &b);
+        pair(&app_client, &app_relay);
+        TlsServerArg srv = { b, cert, 1, 0, 0, 0 };
+        HANDLE th = CreateThread(NULL, 0, tls_proxy_server, &srv, 0, NULL);
+        CHECK(th != NULL);
+        DWORD tls_err = 0;
+        PB_TLS_CLIENT *tls = pb_tls_client_open(a, "localhost", TRUE, &tls_err);
+        CHECK(tls != NULL);
+        int status = 0; DWORD err = 0;
+        CHECK(pb_tls_client_http_connect(tls, "api.openai.com", 443, "user", "pass", &status, &err) == 0);
+        CHECK(status == 200);
+        RelayThreadArg rarg = { tls, app_relay };
+        HANDLE rth = CreateThread(NULL, 0, run_tls_relay, &rarg, 0, NULL);
+        CHECK(rth != NULL);
+        char first = 0;
+        CHECK(recv(app_client, &first, 1, 0) == 1 && first == 'Z');
+        CHECK(send(app_client, "PING", 4, 0) == 4);
+        char pong[5] = {0};
+        CHECK(recv(app_client, pong, 4, MSG_WAITALL) == 4 && !strcmp(pong, "PONG"));
+        closesocket(app_client);
+        WaitForSingleObject(rth, 2000); CloseHandle(rth);
+        WaitForSingleObject(th, 2000); CloseHandle(th);
+        CHECK(srv.handshake_ok && srv.request_matched && srv.relay_echo_ok);
+        pb_tls_client_close(tls);
+        closesocket(a);
+        closesocket(b);
+    }
+
+    CertFreeCertificateContext(cert);
+    if (key) CryptDestroyKey(key);
+    if (prov) CryptReleaseContext(prov, 0);
+    CryptAcquireContextW(&prov, container, NULL, PROV_RSA_AES, CRYPT_DELETEKEYSET);
+}
+
 static void tests(void)
 {
     unsigned char bytes[1024],split[1100];char host[254];
@@ -80,6 +359,7 @@ static void tests(void)
     CHECK(ld_tls_http_connect(INVALID_SOCKET,"chatgpt.com\r\nHost:evil",443,NULL,NULL)==-1);
     CHECK(ld_tls_http_connect_auth(INVALID_SOCKET,"chatgpt.com",443,"bad\r\nuser","pass",NULL,NULL)==-1);
     CHECK(ld_tls_http_connect_auth(INVALID_SOCKET,"chatgpt.com",443,"user","bad\npass",NULL,NULL)==-1);
+    schannel_tests();
     printf("TLS/domain tunnel checks passed: %d\n",checks);
 }
 /* Driver-free integration fixture. It exercises the production peek/CONNECT

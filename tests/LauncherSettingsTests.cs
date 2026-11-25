@@ -26,10 +26,11 @@ internal static class LauncherSettingsTests
             var input = new LauncherSettings
             {
                 Target = "antigravity",
-                Host = "192.168.10.20",
-                Port = "7897",
-                Protocol = "socks5",
+                Host = "proxy.example.com",
+                Port = "443",
+                Protocol = "https",
                 Enhanced = true,
+                AllowInsecureTls = true,
                 English = true,
                 Username = "my-user",
                 Password = "SuperSecret!Password#99"
@@ -38,7 +39,7 @@ internal static class LauncherSettingsTests
             Check(store.Exists(), "settings file created");
 
             string rawJson = File.ReadAllText(path, new UTF8Encoding(false));
-            Check(rawJson.Contains("192.168.10.20") && rawJson.Contains("7897"), "host and port persisted");
+            Check(rawJson.Contains("proxy.example.com") && rawJson.Contains("443"), "host and port persisted");
             Check(rawJson.Contains("my-user"), "username persisted");
             Check(!rawJson.Contains("SuperSecret!Password#99"), "plaintext password NEVER written to disk");
             Check(rawJson.Contains("ProtectedPassword"), "DPAPI protected password stored");
@@ -46,10 +47,11 @@ internal static class LauncherSettingsTests
             LauncherSettings loaded = store.Load();
             Check(loaded != null, "saved settings loaded");
             Check(loaded.Target == "antigravity", "target restored");
-            Check(loaded.Host == "192.168.10.20", "host restored");
-            Check(loaded.Port == "7897", "port restored");
-            Check(loaded.Protocol == "socks5", "protocol restored");
+            Check(loaded.Host == "proxy.example.com", "host restored");
+            Check(loaded.Port == "443", "port restored");
+            Check(loaded.Protocol == "https", "protocol restored");
             Check(loaded.Enhanced, "enhanced flag restored");
+            Check(loaded.AllowInsecureTls, "AllowInsecureTls flag restored");
             Check(loaded.English, "language flag restored");
             Check(loaded.Username == "my-user", "username restored");
             Check(loaded.Password == "SuperSecret!Password#99", "DPAPI password decrypted cleanly for current user");

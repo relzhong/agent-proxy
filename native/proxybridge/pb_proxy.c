@@ -52,6 +52,25 @@ BOOL is_proxy_config_referenced(UINT32 config_id)
     return referenced;
 }
 
+static ProxyType normalize_proxy_type(ProxyType type)
+{
+    if (type == PROXY_TYPE_HTTP || type == PROXY_TYPE_HTTPS || type == PROXY_TYPE_SOCKS5)
+        return type;
+    return PROXY_TYPE_SOCKS5;
+}
+
+const char* proxy_type_name(ProxyType type)
+{
+    if (type == PROXY_TYPE_HTTPS) return "HTTPS";
+    if (type == PROXY_TYPE_HTTP) return "HTTP";
+    return "SOCKS5";
+}
+
+PROXYBRIDGE_API void ProxyBridge_SetTlsInsecure(BOOL insecure)
+{
+    g_tls_insecure = insecure ? TRUE : FALSE;
+}
+
 PROXYBRIDGE_API UINT32 ProxyBridge_AddProxyConfig(ProxyType type, const char* proxy_ip, UINT16 proxy_port, const char* username, const char* password, BOOL send_domain_to_proxy)
 {
     if (proxy_ip == NULL || proxy_ip[0] == '\0' || proxy_port == 0)
@@ -67,9 +86,10 @@ PROXYBRIDGE_API UINT32 ProxyBridge_AddProxyConfig(ProxyType type, const char* pr
     memset(cfg, 0, sizeof(PROXY_CONFIG));
 
     cfg->config_id = g_next_config_id++;
-    cfg->type      = (type == PROXY_TYPE_HTTP) ? PROXY_TYPE_HTTP : PROXY_TYPE_SOCKS5;
+    cfg->type      = normalize_proxy_type(type);
     cfg->port      = proxy_port;
     cfg->send_domain_to_proxy = send_domain_to_proxy;
+    cfg->tls_insecure = g_tls_insecure;
     strncpy_s(cfg->host, sizeof(cfg->host), proxy_ip, _TRUNCATE);
     cfg->resolved_ip = resolve_hostname(proxy_ip);
     if (username != NULL) strncpy_s(cfg->username, sizeof(cfg->username), username, _TRUNCATE);
@@ -102,9 +122,10 @@ PROXYBRIDGE_API BOOL ProxyBridge_EditProxyConfig(UINT32 config_id, ProxyType typ
             if (cfg->udp_send_sock != INVALID_SOCKET) { closesocket(cfg->udp_send_sock); cfg->udp_send_sock = INVALID_SOCKET; }
             cfg->udp_connected = FALSE;
 
-            cfg->type = (type == PROXY_TYPE_HTTP) ? PROXY_TYPE_HTTP : PROXY_TYPE_SOCKS5;
+            cfg->type = normalize_proxy_type(type);
             cfg->port = proxy_port;
             cfg->send_domain_to_proxy = send_domain_to_proxy;
+            cfg->tls_insecure = g_tls_insecure;
             strncpy_s(cfg->host, sizeof(cfg->host), proxy_ip, _TRUNCATE);
             cfg->resolved_ip = resolved;
             cfg->username[0] = '\0';
@@ -231,7 +252,7 @@ PROXYBRIDGE_API int ProxyBridge_TestProxyConfigEx(UINT32 config_id, const char* 
     BOOL use_auth = (cfg->username[0] != '\0');
 
     TLOG("Proxy:    %s:%u", cfg->host, cfg->port);
-    TLOG("Protocol: %s", is_socks ? "SOCKS5" : "HTTP");
+    TLOG("Protocol: %s", proxy_type_name(cfg->type));
     TLOG("Auth:     %s", use_auth ? "yes" : "no");
     TLOG("Target:   %s:%u", target_host, target_port);
 

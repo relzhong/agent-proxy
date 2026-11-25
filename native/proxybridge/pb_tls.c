@@ -144,13 +144,9 @@ static void ld_tls_base64_encode(const char *input, size_t input_len, char *outp
     output[out] = 0;
 }
 
-/* Read only headers, preserving any tunneled bytes that follow them in the same TCP segment. */
-int ld_tls_http_connect_auth(SOCKET proxy, const char *host, unsigned short port, const char *username, const char *password, int *status, DWORD *error)
+int ld_tls_format_connect_request(const char *host, unsigned short port, const char *username, const char *password, char *out, size_t out_cap)
 {
-    char request[2048], response[8193]; int written = 0, used = 0, length = 0;
-    if (status) *status = 0;
-    if (error) *error = 0;
-    if (!host || !ld_tls_is_openai_host(host) || !port) return -1;
+    if (!host || host[0] == '\0' || strpbrk(host, "\r\n ") || !port || !out || out_cap == 0) return -1;
     if (username && username[0] != '\0') {
         if (strpbrk(username, "\r\n")) return -1;
         if (password && strpbrk(password, "\r\n")) return -1;
@@ -158,31 +154,51 @@ int ld_tls_http_connect_auth(SOCKET proxy, const char *host, unsigned short port
         int clen = snprintf(creds, sizeof(creds), "%s:%s", username, password ? password : "");
         if (clen <= 0 || clen >= (int)sizeof(creds)) return -1;
         ld_tls_base64_encode(creds, (size_t)clen, encoded, sizeof(encoded));
-        length = snprintf(request, sizeof(request),
+        int length = snprintf(out, out_cap,
             "CONNECT %s:%u HTTP/1.1\r\nHost: %s:%u\r\nProxy-Authorization: Basic %s\r\nProxy-Connection: keep-alive\r\n\r\n",
             host, port, host, port, encoded);
-    } else {
-        length = snprintf(request, sizeof(request),
-            "CONNECT %s:%u HTTP/1.1\r\nHost: %s:%u\r\nProxy-Connection: keep-alive\r\n\r\n",
-            host, port, host, port);
+        SecureZeroMemory(creds, sizeof(creds));
+        SecureZeroMemory(encoded, sizeof(encoded));
+        return (length > 0 && length < (int)out_cap) ? length : -1;
     }
-    if (length <= 0 || length >= (int)sizeof(request)) return -1;
+    int length = snprintf(out, out_cap,
+        "CONNECT %s:%u HTTP/1.1\r\nHost: %s:%u\r\nProxy-Connection: keep-alive\r\n\r\n",
+        host, port, host, port);
+    return (length > 0 && length < (int)out_cap) ? length : -1;
+}
+
+int ld_tls_parse_http_status(const char *response, int length)
+{
+    if (!response || length < 12 || strncmp(response, "HTTP/1.", 7) ||
+        (response[7] != '0' && response[7] != '1') || response[8] != ' ' ||
+        response[9] < '1' || response[9] > '9' || response[10] < '0' || response[10] > '9' ||
+        response[11] < '0' || response[11] > '9' || (response[12] != ' ' && response[12] != '\r')) return -1;
+    return (response[9] - '0') * 100 + (response[10] - '0') * 10 + response[11] - '0';
+}
+
+/* Read only headers, preserving any tunneled bytes that follow them in the same TCP segment. */
+int ld_tls_http_connect_auth(SOCKET proxy, const char *host, unsigned short port, const char *username, const char *password, int *status, DWORD *error)
+{
+    char request[2048], response[8193]; int written = 0, used = 0, length = 0;
+    if (status) *status = 0;
+    if (error) *error = 0;
+    if (!host || !ld_tls_is_openai_host(host) || !port) return -1;
+    length = ld_tls_format_connect_request(host, port, username, password, request, sizeof(request));
+    if (length <= 0) return -1;
     while (written < length) {
         int n = send(proxy, request+written, length-written, 0);
-        if (n <= 0) { if (error && n == SOCKET_ERROR) *error = WSAGetLastError(); return -1; }
+        if (n <= 0) { if (error && n == SOCKET_ERROR) *error = WSAGetLastError(); SecureZeroMemory(request, sizeof(request)); return -1; }
         written += n;
     }
+    SecureZeroMemory(request, sizeof(request));
     while (used < (int)sizeof(response)-1) {
         int n = recv(proxy, response+used, 1, 0);
         if (n != 1) { if (error && n == SOCKET_ERROR) *error = WSAGetLastError(); return -1; }
         used++;
         if (used >= 4 && memcmp(response+used-4, "\r\n\r\n", 4) == 0) {
             response[used] = 0;
-            if (used < 12 || strncmp(response, "HTTP/1.", 7) ||
-                (response[7] != '0' && response[7] != '1') || response[8] != ' ' ||
-                response[9] < '1' || response[9] > '9' || response[10] < '0' || response[10] > '9' ||
-                response[11] < '0' || response[11] > '9' || (response[12] != ' ' && response[12] != '\r')) return -1;
-            int code = (response[9]-'0')*100 + (response[10]-'0')*10 + response[11]-'0';
+            int code = ld_tls_parse_http_status(response, used);
+            if (code < 0) return -1;
             if (status) *status = code;
             return code == 200 ? 0 : -1;
         }

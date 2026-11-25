@@ -42,6 +42,7 @@ SOCKET udp_relay_socket = INVALID_SOCKET;
 SOCKET udp_relay_socket6 = INVALID_SOCKET;
 volatile BOOL running = FALSE;
 DWORD g_current_process_id = 0;
+BOOL g_tls_insecure = FALSE;
 
 BOOL g_traffic_logging_enabled = TRUE;
 
@@ -199,7 +200,7 @@ DWORD WINAPI packet_processor(LPVOID arg)
                                 char dstr[64];
                                 inet_ntop(AF_INET6, ipv6_header->DstAddr, dstr, sizeof(dstr));
                                 char pinfo[128];
-                                if (action6u==RULE_ACTION_PROXY){PROXY_CONFIG*pc=find_proxy_config(pcid6u);if(pc)snprintf(pinfo,sizeof(pinfo),"Proxy %s://%s:%d (UDP)",pc->type==PROXY_TYPE_HTTP?"HTTP":"SOCKS5",pc->host,pc->port);else snprintf(pinfo,sizeof(pinfo),"Proxy (UDP)");}
+                                if (action6u==RULE_ACTION_PROXY){PROXY_CONFIG*pc=find_proxy_config(pcid6u);if(pc)snprintf(pinfo,sizeof(pinfo),"Proxy %s://%s:%d (UDP)",proxy_type_name(pc->type),pc->host,pc->port);else snprintf(pinfo,sizeof(pinfo),"Proxy (UDP)");}
                                 else if(action6u==RULE_ACTION_DIRECT) snprintf(pinfo,sizeof(pinfo),"Direct (UDP)");
                                 else snprintf(pinfo,sizeof(pinfo),"Blocked (UDP)");
                                 g_connection_callback(extract_filename(pname),pid6u,dstr,dp,pinfo);
@@ -393,7 +394,7 @@ DWORD WINAPI packet_processor(LPVOID arg)
                                 PROXY_CONFIG *pcfg = find_proxy_config(proxy_config_id6);
                                 if (pcfg != NULL)
                                     snprintf(proxy_info, sizeof(proxy_info), "Proxy %s://%s:%d",
-                                        pcfg->type == PROXY_TYPE_HTTP ? "HTTP" : "SOCKS5",
+                                        proxy_type_name(pcfg->type),
                                         pcfg->host, pcfg->port);
                                 else
                                     snprintf(proxy_info, sizeof(proxy_info), "Proxy");
@@ -567,7 +568,7 @@ DWORD WINAPI packet_processor(LPVOID arg)
                                     PROXY_CONFIG *pcfg = find_proxy_config(proxy_config_id);
                                     if (pcfg != NULL)
                                         snprintf(proxy_info, sizeof(proxy_info), "Proxy %s://%s:%d (UDP)",
-                                            pcfg->type == PROXY_TYPE_HTTP ? "HTTP" : "SOCKS5",
+                                            proxy_type_name(pcfg->type),
                                             pcfg->host, pcfg->port);
                                     else
                                         snprintf(proxy_info, sizeof(proxy_info), "Proxy (UDP)");
@@ -796,7 +797,7 @@ DWORD WINAPI packet_processor(LPVOID arg)
                                 PROXY_CONFIG *pcfg = find_proxy_config(proxy_config_id);
                                 if (pcfg != NULL)
                                     snprintf(proxy_info, sizeof(proxy_info), "Proxy %s://%s:%d",
-                                        pcfg->type == PROXY_TYPE_HTTP ? "HTTP" : "SOCKS5",
+                                        proxy_type_name(pcfg->type),
                                         pcfg->host, pcfg->port);
                                 else
                                     snprintf(proxy_info, sizeof(proxy_info), "Proxy");
@@ -1100,7 +1101,7 @@ PROXYBRIDGE_API BOOL ProxyBridge_Start(void)
         PROXY_CONFIG *cfg = &g_proxy_configs[i];
         log_message("Proxy config ID %u: %s %s:%u",
             cfg->config_id,
-            cfg->type == PROXY_TYPE_HTTP ? "HTTP" : "SOCKS5",
+            proxy_type_name(cfg->type),
             cfg->host, cfg->port);
     }
     if (g_proxy_config_count == 0)

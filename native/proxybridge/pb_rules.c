@@ -39,7 +39,7 @@ RuleAction check_process_rule_v6(const UINT8 src_ip6[16], UINT16 src_port, const
         PROXY_CONFIG *cfg = find_proxy_config(proxy_config_id);
         if (cfg == NULL || cfg->host[0] == '\0' || cfg->port == 0)
             return RULE_ACTION_DIRECT;
-        if (is_udp && cfg->type == PROXY_TYPE_HTTP)
+        if (is_udp && cfg->type != PROXY_TYPE_SOCKS5)
             return RULE_ACTION_DIRECT;
     }
     if (out_proxy_config_id) *out_proxy_config_id = proxy_config_id;
@@ -748,7 +748,7 @@ RuleAction check_process_rule(UINT32 src_ip, UINT16 src_port, UINT32 dest_ip, UI
             return RULE_ACTION_DIRECT;  // No proxy configured
 
         // UDP: HTTP proxy doesn't support UDP - use per-rule proxy config type
-        if (is_udp && cfg->type == PROXY_TYPE_HTTP)
+        if (is_udp && cfg->type != PROXY_TYPE_SOCKS5)
             return RULE_ACTION_DIRECT;
     }
 

@@ -172,6 +172,7 @@ typedef struct {
     char username[256];
     char password[256];
     BOOL send_domain_to_proxy;  // TRUE = proxy resolves DNS (send hostname), FALSE = send IP
+    BOOL tls_insecure;          // TRUE = allow self-signed / untrusted certs on HTTPS proxy hop
     UINT32 resolved_ip;         // cached at add/edit time - avoids DNS per connection
     ULONGLONG last_udp_attempt;
     SOCKET udp_tcp_ctrl;
@@ -207,6 +208,7 @@ extern SOCKET udp_relay_socket6;
 extern volatile BOOL running;
 extern DWORD g_current_process_id;
 extern BOOL g_traffic_logging_enabled;
+extern BOOL g_tls_insecure;
 extern DNS_CACHE_ENTRY    *g_dns_cache[DNS_CACHE_BUCKETS];
 extern DNS_CACHE_ENTRY_V6 *g_dns_cache_v6[DNS_CACHE_BUCKETS];
 extern SRWLOCK             g_dns_cache_lock;
@@ -304,6 +306,7 @@ void update_has_active_rules(void);
 PROXY_CONFIG* find_proxy_config(UINT32 config_id);
 BOOL any_socks5_config(void);
 BOOL is_proxy_config_referenced(UINT32 config_id);
+const char* proxy_type_name(ProxyType type);
 
 // ---- pb_dns.c ----
 void dns_cache_init(void);

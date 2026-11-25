@@ -47,6 +47,7 @@ namespace AgentProxy
         private readonly ComboBox protocolBox = new ComboBox();
         private readonly TextBox usernameBox = new TextBox();
         private readonly PasswordBox passwordBox = new PasswordBox();
+        private readonly CheckBox allowInsecureTlsCheckBox = new CheckBox { IsChecked = false, Visibility = Visibility.Collapsed };
         private readonly CheckBox processProxyCheckBox = new CheckBox { IsChecked = false };
         private readonly TextBlock antigravityHintLabel = new TextBlock { TextWrapping = TextWrapping.Wrap };
         private readonly Button launchButton = new Button { Height = 42, IsDefault = true };
@@ -242,6 +243,7 @@ namespace AgentProxy
             protocolBox.Height = 36;
             protocolBox.Items.Add("HTTP");
             protocolBox.Items.Add("SOCKS5");
+            protocolBox.Items.Add("HTTPS");
             protocolBox.SelectedIndex = 0;
             protocolBox.SelectionChanged += delegate { if (!isBusy) ApplyLanguage(); };
 
@@ -277,6 +279,14 @@ namespace AgentProxy
             Grid.SetColumn(usernameBox, 0); Grid.SetRow(usernameBox, 1); authGrid.Children.Add(usernameBox);
             Grid.SetColumn(passwordBox, 2); Grid.SetRow(passwordBox, 1); authGrid.Children.Add(passwordBox);
             cardStack.Children.Add(authGrid);
+
+            allowInsecureTlsCheckBox.Margin = new Thickness(0, 0, 0, 12);
+            allowInsecureTlsCheckBox.Foreground = BrushFromRgb(51, 65, 85);
+            allowInsecureTlsCheckBox.FontSize = 12.5;
+            allowInsecureTlsCheckBox.Cursor = Cursors.Hand;
+            allowInsecureTlsCheckBox.Checked += delegate { if (!isBusy) ApplyLanguage(); };
+            allowInsecureTlsCheckBox.Unchecked += delegate { if (!isBusy) ApplyLanguage(); };
+            cardStack.Children.Add(allowInsecureTlsCheckBox);
 
             processProxyCheckBox.Margin = new Thickness(0, 0, 0, 14);
             processProxyCheckBox.Foreground = BrushFromRgb(51, 65, 85);
@@ -381,7 +391,8 @@ namespace AgentProxy
                     targetBox.SelectedIndex = 0;
                     hostBox.Text = resume.Host;
                     portBox.Text = resume.Port.ToString();
-                    protocolBox.SelectedIndex = String.Equals(resume.Protocol, "socks5", StringComparison.OrdinalIgnoreCase) ? 1 : 0;
+                    SelectProtocol(resume.Protocol);
+                    allowInsecureTlsCheckBox.IsChecked = resume.AllowInsecureTls;
                     processProxyCheckBox.IsChecked = resume.Enhanced;
                     english = resume.English;
                     UpdateTargetMode();
@@ -413,11 +424,22 @@ namespace AgentProxy
             targetBox.SelectedIndex = String.Equals(saved.Target, "antigravity", StringComparison.OrdinalIgnoreCase) ? 1 : 0;
             if (!String.IsNullOrWhiteSpace(saved.Host)) hostBox.Text = saved.Host.Trim();
             if (!String.IsNullOrWhiteSpace(saved.Port)) portBox.Text = saved.Port.Trim();
-            protocolBox.SelectedIndex = String.Equals(saved.Protocol, "socks5", StringComparison.OrdinalIgnoreCase) ? 1 : 0;
+            SelectProtocol(saved.Protocol);
+            allowInsecureTlsCheckBox.IsChecked = saved.AllowInsecureTls;
             processProxyCheckBox.IsChecked = saved.Enhanced;
             english = saved.English;
             usernameBox.Text = saved.Username ?? String.Empty;
             passwordBox.Password = saved.Password ?? String.Empty;
+        }
+
+        private void SelectProtocol(string protocol)
+        {
+            if (String.Equals(protocol, "socks5", StringComparison.OrdinalIgnoreCase))
+                protocolBox.SelectedIndex = 1;
+            else if (String.Equals(protocol, "https", StringComparison.OrdinalIgnoreCase))
+                protocolBox.SelectedIndex = 2;
+            else
+                protocolBox.SelectedIndex = 0;
         }
 
         private void SaveCurrentSettings()
@@ -430,6 +452,7 @@ namespace AgentProxy
                 Port = portBox.Text.Trim(),
                 Protocol = SelectedProtocol,
                 Enhanced = processProxyCheckBox.IsChecked == true,
+                AllowInsecureTls = allowInsecureTlsCheckBox.IsChecked == true,
                 English = english,
                 Username = usernameBox.Text,
                 Password = passwordBox.Password
@@ -496,8 +519,9 @@ namespace AgentProxy
         }
 
         private bool IsAntigravitySelected { get { return targetBox.SelectedIndex == 1; } }
-        private string SelectedProtocol { get { return protocolBox.SelectedIndex == 1 ? "socks5" : "http"; } }
+        private string SelectedProtocol { get { return protocolBox.SelectedIndex == 1 ? "socks5" : (protocolBox.SelectedIndex == 2 ? "https" : "http"); } }
         private bool HasCredentials { get { return !String.IsNullOrEmpty(usernameBox.Text) || !String.IsNullOrEmpty(passwordBox.Password); } }
+        private bool TrustSelfSignedHttps { get { return SelectedProtocol == "https" && allowInsecureTlsCheckBox.IsChecked == true; } }
         private string L(string chinese, string englishText) { return english ? englishText : chinese; }
 
         private void UpdateTargetMode()
@@ -521,10 +545,17 @@ namespace AgentProxy
 
         private void ApplyTargetStatus()
         {
+            string protoUpper = SelectedProtocol.ToUpperInvariant();
             if (IsAntigravitySelected)
             {
-                SetStatus(L("准备就绪 · Antigravity 进程级代理（支持 HTTP / SOCKS5 与账密认证）",
-                    "Ready · Antigravity process proxy (HTTP / SOCKS5 + auth)"), null);
+                SetStatus(L("准备就绪 · Antigravity 进程级代理（支持 HTTP / SOCKS5 / HTTPS 与账密认证）",
+                    "Ready · Antigravity process proxy (HTTP / SOCKS5 / HTTPS + auth)"), null);
+                return;
+            }
+            if (TrustSelfSignedHttps && processProxyCheckBox.IsChecked != true)
+            {
+                SetStatus(L("注意：信任 HTTPS 代理自签名证书需勾选「启用增强代理」（仅对代理连接生效，不影响目标网站校验）",
+                    "Note: Trusting self-signed HTTPS proxy certs requires Enhanced Proxy (proxy hop only; target TLS remains strict)"), false);
                 return;
             }
             if (HasCredentials && processProxyCheckBox.IsChecked != true)
@@ -535,18 +566,22 @@ namespace AgentProxy
             }
             if (SelectedProtocol == "socks5" && processProxyCheckBox.IsChecked != true)
             {
-                SetStatus(L("注意：SOCKS5 不支持普通模式 Codex / ChatGPT，请勾选「启用增强代理」或改用 HTTP",
-                    "Note: SOCKS5 is not supported in standard Codex / ChatGPT mode; enable Enhanced Proxy or switch to HTTP"), false);
+                SetStatus(L("注意：SOCKS5 不支持普通模式 Codex / ChatGPT，请勾选「启用增强代理」或改用 HTTP / HTTPS",
+                    "Note: SOCKS5 is not supported in standard Codex / ChatGPT mode; enable Enhanced Proxy or switch to HTTP / HTTPS"), false);
                 return;
             }
             if (processProxyCheckBox.IsChecked == true)
             {
-                SetStatus(SelectedProtocol == "socks5"
-                    ? L("准备就绪 · 已勾选增强代理（SOCKS5 驱动级 443 转发，需驱动授权）", "Ready · Enhanced proxy selected (SOCKS5 driver 443 routing, approval required)")
-                    : L("准备就绪 · 已勾选增强代理（HTTP 驱动级 443 转发，需驱动授权）", "Ready · Enhanced proxy selected (HTTP driver 443 routing, approval required)"), null);
+                SetStatus(String.Format(
+                    L("准备就绪 · 已勾选增强代理（{0} 驱动级 443 转发，需驱动授权）",
+                      "Ready · Enhanced proxy selected ({0} driver 443 routing, approval required)"),
+                    protoUpper), null);
                 return;
             }
-            SetStatus(L("准备就绪 · 普通代理模式（无需驱动，仅支持无认证 HTTP）", "Ready · Standard proxy mode (no driver needed, unauthenticated HTTP only)"), null);
+            SetStatus(String.Format(
+                L("准备就绪 · 普通代理模式（无需驱动，支持无认证 {0}）",
+                  "Ready · Standard proxy mode (no driver needed, unauthenticated {0})"),
+                protoUpper), null);
         }
 
         private void ApplyLanguage()
@@ -556,13 +591,18 @@ namespace AgentProxy
                 "无需开启全局代理，为 ChatGPT / Codex 或 Antigravity 单独代理",
                 "Proxy ChatGPT / Codex or Antigravity without enabling a global proxy");
             targetLabel.Text = L("启动目标", "Target app");
-            hostLabel.Text = L("代理主机（本机 / 局域网 IP）", "Proxy host (local / LAN IP)");
+            hostLabel.Text = L("代理主机（IP / 域名）", "Proxy host (IP / domain)");
             portLabel.Text = L("代理端口", "Proxy port");
             protocolLabel.Text = L("代理协议", "Protocol");
             usernameLabel.Text = L("用户名（可选）", "Username (optional)");
             passwordLabel.Text = L("密码（可选）", "Password (optional)");
-            processProxyCheckBox.Content = (!IsAntigravitySelected && (SelectedProtocol == "socks5" || HasCredentials))
-                ? L("启用增强代理（SOCKS5 或账密认证不支持普通 Codex，必须勾选）", "Enable enhanced proxy (required for SOCKS5 / auth on Codex)")
+            allowInsecureTlsCheckBox.Content = L(
+                "信任自签名证书（仅用于 HTTPS 代理握手）",
+                "Trust self-signed proxy cert (HTTPS proxy hop only)");
+            allowInsecureTlsCheckBox.Visibility = SelectedProtocol == "https" ? Visibility.Visible : Visibility.Collapsed;
+            bool requiresEnhanced = !IsAntigravitySelected && (SelectedProtocol == "socks5" || HasCredentials || TrustSelfSignedHttps);
+            processProxyCheckBox.Content = requiresEnhanced
+                ? L("启用增强代理（SOCKS5 / 账密 / 自签名需要增强模式，必须勾选）", "Enable enhanced proxy (required for SOCKS5 / auth / self-signed)")
                 : L("启用增强代理（WinDivert 驱动级 443 转发，可选）", "Enable enhanced proxy (WinDivert 443 routing, optional)");
             antigravityHintLabel.Text = L(
                 "通过 version.dll 注入主进程与子进程，无需驱动与管理员权限",
@@ -571,10 +611,10 @@ namespace AgentProxy
                 ? L("部署代理并启动 Antigravity", "Apply proxy & launch Antigravity")
                 : L("启动 ChatGPT / Codex", "Launch ChatGPT / Codex");
             footnote.Text = IsAntigravitySelected
-                ? L("配置自动保存；每次启动校验并恢复 version.dll，并将主机/端口/协议/凭据写入 config.json（密码本地加密保存）。",
-                    "Settings are saved automatically (password encrypted locally); verifies version.dll and writes host/port/protocol/auth to config.json.")
-                : L("普通模式仅支持无认证 HTTP；SOCKS5 或用户名/密码认证需勾选增强代理。配置自动保存，密码使用当前用户 DPAPI 加密存储。",
-                    "Standard mode supports unauthenticated HTTP only; SOCKS5 or auth requires Enhanced Proxy. Settings save automatically with DPAPI encryption.");
+                ? L("配置自动保存；支持 HTTP / SOCKS5 / HTTPS（含域名与自签名信任），写入 config.json 并自动校验 version.dll。",
+                    "Settings save automatically; supports HTTP / SOCKS5 / HTTPS (domain + self-signed trust), updating config.json & version.dll.")
+                : L("普通模式支持无认证 HTTP / HTTPS（需系统信任证书）；SOCKS5、账密认证或自签名证书需勾选增强代理。",
+                    "Standard mode supports unauthenticated HTTP / system-trusted HTTPS; SOCKS5, auth, or self-signed cert requires Enhanced Proxy.");
             browserProxyButton.Content = L("检查 / 修复浏览器", "Check / repair browser");
             removePatchButton.Content = L("移除 Antigravity 代理补丁 (version.dll)", "Remove Antigravity proxy patch (version.dll)");
             ApplyTargetStatus();
@@ -616,6 +656,7 @@ namespace AgentProxy
             protocolBox.IsEnabled = enabled;
             usernameBox.IsEnabled = enabled;
             passwordBox.IsEnabled = enabled;
+            allowInsecureTlsCheckBox.IsEnabled = enabled;
         }
 
         private async void LaunchButtonClick(object sender, RoutedEventArgs e)
@@ -634,6 +675,7 @@ namespace AgentProxy
                     bool isAntigravity = IsAntigravitySelected;
                     string protocol = SelectedProtocol;
                     bool enhanced = processProxyCheckBox.IsChecked == true;
+                    bool allowInsecureTls = TrustSelfSignedHttps;
                     string username = usernameBox.Text;
                     string password = passwordBox.Password;
                     bool hasAuth = !String.IsNullOrEmpty(username);
@@ -644,12 +686,15 @@ namespace AgentProxy
                         throw new Exception(L("填写代理密码时必须同时填写用户名。", "A proxy username is required when a password is provided."));
                     ProcessProxy.ProxyPlan.ValidateCredential(username, "Proxy username");
                     ProcessProxy.ProxyPlan.ValidateCredential(password, "Proxy password");
+                    if (!isAntigravity && allowInsecureTls && !enhanced)
+                        throw new Exception(L("信任 HTTPS 自签名证书需勾选「启用增强代理」（仅对代理连接生效，不影响目标网站校验）。",
+                            "Trusting self-signed HTTPS proxy certs requires Enhanced Proxy (proxy hop only; target TLS stays strict)."));
                     if (!isAntigravity && hasAuth && !enhanced)
                         throw new Exception(L("带用户名/密码的代理不支持普通模式 Codex / ChatGPT，请勾选「启用增强代理」或清空凭据。",
                             "Authenticated proxies are not supported in standard Codex / ChatGPT mode. Enable Enhanced Proxy or clear the credentials."));
                     if (!isAntigravity && protocol == "socks5" && !enhanced)
-                        throw new Exception(L("SOCKS5 不支持普通模式 Codex / ChatGPT，请勾选「启用增强代理」或改用 HTTP。",
-                            "SOCKS5 is not supported in standard Codex / ChatGPT mode. Enable Enhanced Proxy or switch to HTTP."));
+                        throw new Exception(L("SOCKS5 不支持普通模式 Codex / ChatGPT，请勾选「启用增强代理」或改用 HTTP / HTTPS。",
+                            "SOCKS5 is not supported in standard Codex / ChatGPT mode. Enable Enhanced Proxy or switch to HTTP / HTTPS."));
                     SaveCurrentSettings();
                     SetStatus(L("正在检查代理…", "Checking proxy…"), null);
 
@@ -663,7 +708,7 @@ namespace AgentProxy
                         if (await Task.Run(() => AntigravityLauncher.IsRunning(agExe)))
                             throw new Exception(L("Antigravity 已在运行，请完全退出后再试。", "Antigravity is already running. Fully quit it and try again."));
                         SetStatus(L("正在写入配置并校验 version.dll…", "Writing config and verifying version.dll…"), null);
-                        await Task.Run(() => AntigravityLauncher.DeployAndWriteConfig(agExe, host, port, protocol, null, username, password));
+                        await Task.Run(() => AntigravityLauncher.DeployAndWriteConfig(agExe, host, port, protocol, null, username, password, allowInsecureTls));
                         await Task.Run(() => AntigravityLauncher.Launch(agExe));
                         diagnostics.Stage("running");
                         SetStatus(String.Format(L("已通过 {0}://{1}:{2}{3} 启动 Antigravity", "Antigravity started via {0}://{1}:{2}{3}"),
@@ -675,14 +720,16 @@ namespace AgentProxy
                         throw new Exception(L("ChatGPT 已在运行，请完全退出后再试。", "ChatGPT is already running. Fully quit it and try again."));
 
                     string proxyDisplay = String.Format("{0}://{1}:{2}", protocol, host, port);
-                    string clientProxyArg = hasAuth ? String.Format("direct://{0}:{1}", host, port) : proxyDisplay;
+                    string clientProxyArg = (enhanced && (hasAuth || protocol == "https"))
+                        ? String.Format("direct://{0}:{1}", host, port)
+                        : proxyDisplay;
                     if (enhanced)
                     {
                         SetStatus(L("正在准备增强代理组件…", "Preparing enhanced proxy components…"), null);
                         diagnostics.Stage("preparing-runtime");
                         var resumeSettings = new PortableResume
                         {
-                            Host = host, Port = port, Protocol = protocol, Enhanced = true, English = english
+                            Host = host, Port = port, Protocol = protocol, Enhanced = true, AllowInsecureTls = allowInsecureTls, English = english
                         };
                         bool handedOff = await Task.Run(() => PortableRuntime.Handoff(resumeSettings));
                         if (handedOff) { Close(); return; }
@@ -703,6 +750,7 @@ namespace AgentProxy
                                 ProxyType = protocol,
                                 ProxyUsername = username,
                                 ProxyPassword = password,
+                                AllowInsecureTls = allowInsecureTls,
                                 Process443Approved = true,
                                 DriverApproved = true
                             });

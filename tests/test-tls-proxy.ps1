@@ -7,7 +7,7 @@ if(Test-Path -LiteralPath $OutputDirectory){throw 'Use a fresh test output direc
 New-Item -ItemType Directory -Path $OutputDirectory | Out-Null
 Push-Location $OutputDirectory
 try {
- & cl.exe /nologo /utf-8 /MT /GS /W4 "/I$repo\native\proxybridge" "$repo\native\proxybridge\pb_tls.c" "$PSScriptRoot\TlsProxyTests.c" "/Fe:$OutputDirectory\TlsProxyTests.exe" /link ws2_32.lib
+ & cl.exe /nologo /utf-8 /MT /GS /W4 "/I$repo\native\proxybridge" "$repo\native\proxybridge\pb_tls.c" "$repo\native\proxybridge\pb_schannel.c" "$PSScriptRoot\TlsProxyTests.c" "/Fe:$OutputDirectory\TlsProxyTests.exe" /link ws2_32.lib secur32.lib crypt32.lib advapi32.lib
  if($LASTEXITCODE -ne 0){throw 'TLS fixture compilation failed.'}
  & "$OutputDirectory\TlsProxyTests.exe"
  if($LASTEXITCODE -ne 0){throw 'TLS/domain tunnel checks failed.'}
