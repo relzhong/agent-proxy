@@ -28,6 +28,33 @@ namespace VersionProxy {
 }
 
 namespace {
+    // 同进程单实例保护：防止同一进程从不同路径加载多份代理 DLL 时重复安装网络 Hook
+    static HANDLE g_hookOwnerMutex = NULL;
+    static bool g_ownsHooks = false;
+
+    static bool TryClaimProcessHookOwnership() {
+        wchar_t name[64] = {};
+        swprintf(name, sizeof(name) / sizeof(name[0]), L"Local\\AntigravityProxy_Hooks_%lu",
+                 static_cast<unsigned long>(GetCurrentProcessId()));
+        HANDLE mutex = CreateMutexW(NULL, FALSE, name);
+        if (mutex == NULL) {
+            return true;
+        }
+        if (GetLastError() == ERROR_ALREADY_EXISTS) {
+            CloseHandle(mutex);
+            return false;
+        }
+        g_hookOwnerMutex = mutex;
+        return true;
+    }
+
+    static void ReleaseProcessHookOwnership() {
+        if (g_hookOwnerMutex != NULL) {
+            CloseHandle(g_hookOwnerMutex);
+            g_hookOwnerMutex = NULL;
+        }
+    }
+
     static bool IsCommandLineWhitespace(wchar_t value) {
         return value == L' ' || value == L'\t' || value == L'\r' || value == L'\n';
     }
@@ -243,6 +270,12 @@ BOOL WINAPI DllMain(HINSTANCE hinstDLL, DWORD fdwReason, LPVOID lpvReserved) {
             break;
         }
 
+        if (!TryClaimProcessHookOwnership()) {
+            Core::Logger::Warn("[单实例] 当前进程已有另一份代理实例安装了 Hook，本实例跳过 Hook 安装，仅保留 version.dll 导出转发。");
+            break;
+        }
+        g_ownsHooks = true;
+
         // 诊断构建：只旁路 Chromium NetworkService，用于区分宿主进程角色对本地 TLS 的影响。
         const std::string processName = GetCurrentProcessBaseName();
         const bool bypassNetworkService =
@@ -268,7 +301,11 @@ BOOL WINAPI DllMain(HINSTANCE hinstDLL, DWORD fdwReason, LPVOID lpvReserved) {
         }
 
         // lpvReserved 为空表示动态卸载，或 DLL 加载失败后的回滚；此时保留必要清理。
-        Hooks::Uninstall();
+        if (g_ownsHooks) {
+            Hooks::Uninstall();
+            ReleaseProcessHookOwnership();
+            g_ownsHooks = false;
+        }
         VersionProxy::Uninitialize();
         Core::Logger::Info("DLL 被显式释放或加载失败回滚：已完成 Hooks 与版本代理清理");
         break;
